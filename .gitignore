@@ -1,0 +1,10 @@
+# macOS
+.DS_Store
+
+# devkitARM のビルド中間物
+shooter-nds/build/
+shooter-nds/*.elf
+shooter-nds/*.map
+
+# 生成スクリプトが吐く確認用プレビュー
+shooter/_preview/

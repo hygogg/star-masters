@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>STAR MASTERS - 8bit vertical shooter</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<style>
+    html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: #10101c;
+        overflow: hidden;
+    }
+    body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    #enchant-stage {
+        width: 320px;
+        height: 480px;
+    }
+    /* ドット絵をにじませない */
+    #enchant-stage,
+    #enchant-stage canvas,
+    #enchant-stage img {
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+    }
+</style>
+</head>
+<body>
+<div id="enchant-stage"></div>
+
+<script src="lib/enchant.js"></script>
+<script>
+    /* Sprite/Scene 等のクラスをグローバルへ展開。
+       entities.js が読み込み時に Class.create を使うため、必ずここで呼ぶ */
+    enchant();
+</script>
+<script src="js/config.js"></script>
+<script src="js/assets.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/entities.js"></script>
+<script src="js/scenes.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
