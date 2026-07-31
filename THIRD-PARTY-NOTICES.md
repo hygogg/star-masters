@@ -1,99 +1,77 @@
 # 第三者ソフトウェアの表記
 
-このリポジトリに含まれる、他者が権利を持つソフトウェアの一覧。
 **ドット絵・BGM・SE・ゲームコードはすべてこのリポジトリで新規に作ったもので、
-外部から取り込んだ素材は含まれていない**(`shooter/tools/` の生成スクリプトが
-ドット絵のグリッドと音符データから作り出している)。
+外部から取り込んだ素材は含まれていない。**
+ドット絵は `generate_images.py` 内のASCIIグリッド、BGMは `generate_audio.py` 内の
+音符データとしてソースに直接書かれており、スクリプトを再実行すれば
+同じファイルがバイト単位で再現される。生成スクリプトはPython標準ライブラリのみを使い、
+ネットワークアクセスも外部ファイルの読み込みも行わない。
 
 ---
 
-## 1. enchant.js v0.8.3 — MIT License
+## 同梱している第三者ソフトウェア
+
+### enchant.js v0.8.3 — MIT License
 
 `shooter/lib/enchant.js`
 
 ブラウザ版が使っているゲームライブラリ。
-[公式リポジトリ](https://github.com/wise9/enchant.js) の タグ `v0.8.3` の
-`dev/src/*.js` を公式のビルド順(`Gruntfile.coffee` の `concat` 定義)で連結したもの。
-ライセンス表記はファイル冒頭に保持している。
+[公式リポジトリ](https://github.com/wise9/enchant.js) のタグ `v0.8.3` の
+`dev/src/*.js` を、公式のビルド順(`Gruntfile.coffee` の `concat` 定義)で連結したもの。
 
 ```
+enchant.js v0.8.3
+http://enchantjs.com
+
 Copyright Ubiquitous Entertainment Inc.
 Released under the MIT license.
 ```
 
----
+MITは「複製物に著作権表示と許諾表示を含めること」を条件とする。
+本リポジトリはこのファイル自体を同梱しているため表記が必要で、
+表記はファイル冒頭に保持している。
 
-## 2. libnds — zlib風ライセンス
-
-DS版のROM `shooter-nds/star-masters.nds` に静的リンクされている
-(ソースはこのリポジトリには含まれない。devkitPro が配布)。
-
-```
-Copyright (C) 2005
-    Michael Noland (joat)
-    Jason Rogers (dovoto)
-    Dave Murphy (WinterMute)
-
-This software is provided 'as-is', without any express or implied
-warranty.  In no event will the authors be held liable for any
-damages arising from the use of this software.
-
-Permission is granted to anyone to use this software for any
-purpose, including commercial applications, and to alter it and
-redistribute it freely, subject to the following restrictions:
-
-1. The origin of this software must not be misrepresented; you
-   must not claim that you wrote the original software. If you use
-   this software in a product, an acknowledgment in the product
-   documentation would be appreciated but is not required.
-
-2. Altered source versions must be plainly marked as such, and
-   must not be misrepresented as being the original software.
-
-3. This notice may not be removed or altered from any source
-   distribution.
-```
+これ以外に同梱している第三者のコード・素材はない。
 
 ---
 
-## 3. maxmod — ISC License
+## ビルド時にリンクされるもの(このリポジトリには含まれない)
 
-DS版のサウンドドライバ。ROM `shooter-nds/star-masters.nds` に静的リンクされている。
+DS版をビルドすると、devkitPro が配布する以下のライブラリが `.nds` に静的リンクされる。
+**ビルド済みの `.nds` は意図的にこのリポジトリに含めていない**ため、
+本リポジトリの配布に関してこれらの表記義務は発生しない。
 
-```
-Nintendo DS & Gameboy Advance Sound System
+| | ライセンス | 表記義務(バイナリ再配布時) |
+|---|---|---|
+| libnds | zlib風 | **不要**(条文に「appreciated but is not required」と明記) |
+| maxmod | ISC | **必要**("appear in all copies") |
+| newlib | BSD系の集合(57項目) | **必要**(34項目が binary form での表記を要求) |
+| libgcc | GPLv3 + GCC Runtime Library Exception | 不要(例外条項によりバイナリ配布に義務は生じない) |
 
-Copyright (c) 2008, Mukunda Johnson (mukunda@maxmod.org)
+### ビルドした `.nds` を他人に配る場合
 
-Permission to use, copy, modify, and/or distribute this software for any
-purpose with or without fee is hereby granted, provided that the above
-copyright notice and this permission notice appear in all copies.
+自分でビルドした `.nds` を配布・公開する場合は、上表のうち「必要」のものについて
+配布物に著作権表示と許諾文を添える必要がある。具体的には:
 
-THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
-WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
-MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
-ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
-ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
-OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
-```
+- **maxmod** — `$DEVKITPRO/libnds/maxmod_license.txt`(ISC。Copyright (c) 2008, Mukunda Johnson)
+- **newlib** — newlib の `COPYING.NEWLIB`
+  ([sourceware.org](https://sourceware.org/git/?p=newlib-cygwin.git;a=blob_plain;f=COPYING.NEWLIB;hb=HEAD))
 
-`audio/*.mod` と `audio/*.wav` を `soundbank.bin` にまとめる `mmutil` も
-maxmod プロジェクトのツール(ビルド時のみ使用、リポジトリには含まれない)。
+どちらも devkitPro のインストール先、または上記の配布元から取得できる。
 
 ---
 
-## 4. shooter-nds/Makefile
+## 土台にした定型コード
+
+### shooter-nds/Makefile
 
 devkitPro が配布する NDS サンプル
-(`$DEVKITPRO/examples/nds/audio/maxmod/basic_sound/Makefile`)を土台にして、
+(`$DEVKITPRO/examples/nds/audio/maxmod/basic_sound/Makefile`)を土台に、
 ターゲット名・ROMヘッダ・音源ディレクトリ・`CFLAGS_EXTRA` を追加したもの。
 devkitPro のサンプル Makefile は、この種のプロジェクトの定型ひな形として
 配布・利用されている。
 
----
-
-## 5. shooter/serve.mjs
+### shooter/serve.mjs
 
 同じ作業ディレクトリにあった `ruin-runner/serve.mjs`(このリポジトリの作者自身のコード)を
 土台に、`.wav` の MIME タイプとポート番号を変えたもの。第三者コードではない。
@@ -102,6 +80,6 @@ devkitPro のサンプル Makefile は、この種のプロジェクトの定型
 
 ## 参考にした技術資料(コードの取り込みはしていない)
 
-- [GBATEK](https://problemkaputt.de/gbatek.htm) — DSのハードウェア仕様(スプライト数・サイズ制限など)
+- [GBATEK](https://problemkaputt.de/gbatek.htm) — DSのハードウェア仕様(スプライト数128個/画面、最大64x64 など)
 - ProTracker MOD フォーマットの仕様 — `generate_nds_audio.py` の MOD 書き出しに使用
 - PNG 仕様(RFC 2083) — `generate_images.py` の PNG 書き出しに使用

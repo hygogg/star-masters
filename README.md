@@ -30,15 +30,20 @@ python3 -m http.server 8123
 
 ### DS版を遊ぶ
 
-ビルド済みの `shooter-nds/star-masters.nds` を microSD にコピーして、
-DSpico などのフラッシュカートから起動する。
-
-自分でビルドする場合(ホストに devkitPro を入れる必要はない):
+ビルドして `.nds` を作る。ホストに devkitPro を入れる必要はなく、Dockerだけで完結する。
 
 ```sh
 cd shooter-nds
 docker run --rm -v "$PWD:/w" -w /w devkitpro/devkitarm:latest make
 ```
+
+できた `star-masters.nds` を microSD にコピーして、DSpico などの
+フラッシュカートから起動する(homebrewなので特別なパッチは不要)。
+melonDS などのエミュレータでも動く。
+
+> ビルド済みROMはリポジトリに含めていない。ROMには libnds / maxmod / newlib が
+> 静的リンクされ、再配布するとそれらのライセンス表記義務が発生するため。
+> 詳細は [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) を参照。
 
 移動: 十字キー / 下画面タッチ、ショット: A B X Y、ポーズ: START、ミュート: SELECT。
 
@@ -90,11 +95,9 @@ BGMは `generate_audio.py` 内の音符データ(小節・拍・音高)として
 生成スクリプトはPython標準ライブラリのみを使い、ネットワークアクセスも
 外部ファイルの読み込みも行わない。
 
-第三者のソフトウェアは以下の3点のみで、いずれも許諾範囲内で使っている。
-詳細とライセンス全文は [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) を参照。
+このリポジトリが同梱している第三者ソフトウェアは
+[enchant.js](https://github.com/wise9/enchant.js) v0.8.3(MIT)の1点だけ。
+DS版が使う libnds / maxmod / newlib は各自の環境でビルド時にリンクされるもので、
+このリポジトリには含まれない。
 
-| | ライセンス | どこで使っているか |
-|---|---|---|
-| [enchant.js](https://github.com/wise9/enchant.js) v0.8.3 | MIT | `shooter/lib/enchant.js` として同梱 |
-| libnds | zlib風 | DS版ROMに静的リンク |
-| maxmod | ISC | DS版ROMに静的リンク |
+詳細は [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) を参照。

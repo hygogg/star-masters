@@ -1,8 +1,13 @@
 # macOS
 .DS_Store
 
-# devkitARM のビルド中間物
+# devkitARM のビルド成果物
+#
+# .nds を含めないのは意図的。ROMには libnds / maxmod / newlib が静的リンクされ、
+# 再配布するとそれらのライセンス表記義務が発生するため
+# (詳細は THIRD-PARTY-NOTICES.md)。各自 make でビルドする。
 shooter-nds/build/
+shooter-nds/*.nds
 shooter-nds/*.elf
 shooter-nds/*.map
 
