@@ -81,8 +81,20 @@ python3 tools/generate_nds_audio.py    # DS版のMOD + SE
 DS版の値はブラウザ版の x0.8(320x480 → 256x384 は縦横比が同じなので、
 長さと速度を一律に縮めるだけでバランスがそのまま移る)。
 
-## 同梱物について
+## 素材の出所
 
-`shooter/lib/enchant.js` は [enchant.js](https://github.com/wise9/enchant.js) v0.8.3
-(Ubiquitous Entertainment Inc., MITライセンス)を公式リポジトリのソースから
-ビルドしたもの。ライセンス表記はファイル冒頭に含まれている。
+**ドット絵・BGM・SE・ゲームコードはすべて新規に作ったもの**で、外部から取り込んだ
+素材は一切含まれていない。ドット絵は `generate_images.py` 内のASCIIグリッド、
+BGMは `generate_audio.py` 内の音符データ(小節・拍・音高)として
+ソースに直接書かれており、スクリプトを実行すると同じ結果が再現できる。
+生成スクリプトはPython標準ライブラリのみを使い、ネットワークアクセスも
+外部ファイルの読み込みも行わない。
+
+第三者のソフトウェアは以下の3点のみで、いずれも許諾範囲内で使っている。
+詳細とライセンス全文は [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) を参照。
+
+| | ライセンス | どこで使っているか |
+|---|---|---|
+| [enchant.js](https://github.com/wise9/enchant.js) v0.8.3 | MIT | `shooter/lib/enchant.js` として同梱 |
+| libnds | zlib風 | DS版ROMに静的リンク |
+| maxmod | ISC | DS版ROMに静的リンク |
