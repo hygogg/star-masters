@@ -460,6 +460,7 @@ var MidBoss = Class.create(Group, {
             p.image = imgAsset('midpart');
             p.frame = flickFrames(6);
             p.visible = false;
+            p.flash = 0;
             this.addChild(p);
             this.parts.push(p);
         }
@@ -471,32 +472,48 @@ var MidBoss = Class.create(Group, {
 
         this.state = 'enter';
         this.t = 0;
-        this.hp = cfg.hp;
+        this.hp = cfg.hpMerge;
         this.flash = 0;
         this.shootTimer = cfg.shootEvery;
         this.result = null;          /* 'bonus' | 'normal' | 'escaped' */
+        this.partsSolid = false;     /* 静止してから当たり判定が生まれる */
 
         /* コアは画面上部中央へ */
         this.cx = CONFIG.WIDTH / 2;
         this.cy = -this.core.height / 2;
         this.targetCy = cfg.coreY + this.core.height / 2;
-        this.layout();
+        this.placeCore();
     },
 
-    /* コア中心とパーツ位置を実際のスプライト座標へ反映する */
-    layout: function (partR) {
-        var i, d, px, py;
+    placeCore: function () {
         this.core.x = this.cx - this.core.width / 2;
         this.core.y = this.cy - this.core.height / 2;
-        if (partR === undefined) { return; }
-        for (i = 0; i < 4; i++) {
-            d = MIDBOSS_DIRS[i];
-            px = this.cx + d[0] * partR;
-            py = this.cy + d[1] * partR;
-            this.parts[i].x = px - this.parts[i].width / 2;
-            this.parts[i].y = py - this.parts[i].height / 2;
-            this.parts[i].visible = true;
-        }
+    },
+
+    /* パーツ i の静止位置 / 合体位置 / 画面外の出現位置 */
+    ringPos: function (i) {
+        var d = MIDBOSS_DIRS[i], r = this.cfg.ringR;
+        return [this.cx + d[0] * r, this.cy + d[1] * r];
+    },
+    attachPos: function (i) {
+        var d = MIDBOSS_DIRS[i], r = this.cfg.attachR;
+        return [this.cx + d[0] * r, this.cy + d[1] * r];
+    },
+    startPos: function (i) {
+        var d = MIDBOSS_DIRS[i], ring = this.ringPos(i);
+        var pw = this.parts[i].width, ph = this.parts[i].height;
+        if (d[1] < 0) { return [ring[0], -ph]; }                    /* 上の外 */
+        if (d[1] > 0) { return [ring[0], CONFIG.HEIGHT + ph]; }     /* 下の外 */
+        if (d[0] < 0) { return [-pw, ring[1]]; }                    /* 左の外 */
+        return [CONFIG.WIDTH + pw, ring[1]];                        /* 右の外 */
+    },
+
+    /* パーツを (中心座標) へ置く */
+    setPart: function (i, x, y) {
+        var p = this.parts[i];
+        p.x = x - p.width / 2;
+        p.y = y - p.height / 2;
+        p.visible = true;
     },
 
     /*
@@ -509,21 +526,25 @@ var MidBoss = Class.create(Group, {
         for (i = 0; i < 4; i++) { this.parts[i].opacity = a; }
     },
 
-    /* 攻撃が通る状態か(パーツの移動開始前は効かない) */
-    vulnerable: function () {
+    /* コアに攻撃が通る状態か(パーツの移動開始前は効かない) */
+    coreVulnerable: function () {
         return this.state === 'merge' || this.state === 'full';
     },
 
-    /* 当たり判定の対象(コア + 表示中のパーツ) */
-    targets: function () {
-        var list = [{
-            x: this.cx, y: this.cy,
-            r: this.core.width * 0.36
-        }], i, p;
+    /* コアの当たり判定 */
+    coreTarget: function () {
+        return { x: this.cx, y: this.cy, r: this.core.width * 0.36 };
+    },
+
+    /* 障害物としてのパーツ(常に無敵。飛来中だけ判定なし) */
+    partTargets: function () {
+        var list = [], i, p;
+        if (!this.partsSolid) { return list; }
         for (i = 0; i < 4; i++) {
             p = this.parts[i];
             if (!p.visible) { continue; }
             list.push({
+                idx: i,
                 x: p.x + p.width / 2,
                 y: p.y + p.height / 2,
                 r: p.width * 0.36
@@ -532,9 +553,14 @@ var MidBoss = Class.create(Group, {
         return list;
     },
 
+    /* ショットがパーツに弾かれた(ダメージにはならない) */
+    deflect: function (idx) {
+        this.parts[idx].flash = 4;
+    },
+
     /* 戻り値: 撃破したら 'bonus'(合体前) / 'normal'(合体後)、まだなら null */
     damage: function (n) {
-        if (!this.vulnerable()) { return null; }
+        if (!this.coreVulnerable()) { return null; }
         this.hp -= n;
         this.flash = 3;
         if (this.hp > 0) {
@@ -550,35 +576,56 @@ var MidBoss = Class.create(Group, {
     },
 
     update: function (scene) {
-        var cfg = this.cfg, t = ++this.t, k;
+        var cfg = this.cfg, t = ++this.t, i, k, a, b;
 
         switch (this.state) {
         case 'enter':
             this.cy += 1.6;
             if (this.cy >= this.targetCy) {
                 this.cy = this.targetCy;
+                this.state = 'flyin';
+                this.t = 0;
+                /* 画面外の出現位置を確定させておく */
+                this.starts = [];
+                for (i = 0; i < 4; i++) { this.starts.push(this.startPos(i)); }
+            }
+            this.placeCore();
+            break;
+
+        case 'flyin':
+            /* 四方の画面外から静止位置へ飛び込む。この間は当たり判定なし */
+            k = Math.min(1, t / cfg.flyInFrames);
+            for (i = 0; i < 4; i++) {
+                a = this.starts[i];
+                b = this.ringPos(i);
+                this.setPart(i, a[0] + (b[0] - a[0]) * k,
+                                a[1] + (b[1] - a[1]) * k);
+            }
+            if (t >= cfg.flyInFrames) {
                 this.state = 'hold';
                 this.t = 0;
-                this.layout(cfg.ringR);      /* 四方にパーツを出現させる */
-            } else {
-                this.layout();
+                this.partsSolid = true;    /* ここから障害物になる */
             }
             break;
 
         case 'hold':
-            /* 無敵。パーツは静止したまま点滅で「まだ触れない」ことを示す */
-            this.layout(cfg.ringR);
+            for (i = 0; i < 4; i++) { b = this.ringPos(i); this.setPart(i, b[0], b[1]); }
             if (t >= cfg.holdFrames) { this.state = 'merge'; this.t = 0; }
             break;
 
         case 'merge':
             k = Math.min(1, t / cfg.mergeFrames);
-            this.layout(cfg.ringR + (cfg.attachR - cfg.ringR) * k);
+            for (i = 0; i < 4; i++) {
+                a = this.ringPos(i);
+                b = this.attachPos(i);
+                this.setPart(i, a[0] + (b[0] - a[0]) * k,
+                                a[1] + (b[1] - a[1]) * k);
+            }
             if (t >= cfg.mergeFrames) {
-                /* 合体成立。HPを戻して通常戦闘へ */
+                /* 合体成立。HPを合体後の値に戻して通常戦闘へ */
                 this.state = 'full';
                 this.t = 0;
-                this.hp = cfg.hp;
+                this.hp = cfg.hpFull;
                 this.shootTimer = 30;
             }
             break;
@@ -586,7 +633,8 @@ var MidBoss = Class.create(Group, {
         case 'full':
             this.cx = CONFIG.WIDTH / 2 + Math.sin(t * 0.025) * 90;
             this.cy = this.targetCy + Math.sin(t * 0.017) * 14;
-            this.layout(cfg.attachR);
+            this.placeCore();
+            for (i = 0; i < 4; i++) { b = this.attachPos(i); this.setPart(i, b[0], b[1]); }
             if (--this.shootTimer <= 0) {
                 this.shootTimer = cfg.shootEvery;
                 fireAimed(scene, this.cx, this.cy + 20, 3, 0.26, 3.0);
@@ -599,9 +647,11 @@ var MidBoss = Class.create(Group, {
             break;
 
         case 'dying':
+            this.partsSolid = false;
             if (this.result === 'escaped') {
                 this.cy -= 3;                 /* 上へ退場 */
-                this.layout(cfg.attachR);
+                this.placeCore();
+                for (i = 0; i < 4; i++) { b = this.attachPos(i); this.setPart(i, b[0], b[1]); }
                 if (this.cy < -this.core.height) { return false; }
             } else {
                 if (t % 7 === 0) {
@@ -615,16 +665,23 @@ var MidBoss = Class.create(Group, {
             break;
         }
 
-        /* 見た目: 撃破中はフェード、被弾直後は点滅、静止中(無敵)は薄く点滅 */
+        /* 見た目: 撃破中はフェード、被弾直後は点滅、静止中(コア無敵)は薄く点滅 */
         if (this.state === 'dying' && this.result !== 'escaped') {
             this.setAlpha(Math.max(0, 1 - this.t / 80));
         } else if (this.flash > 0) {
             this.flash--;
             this.setAlpha(0.45);
         } else if (this.state === 'hold') {
-            this.setAlpha((this.t % 10 < 5) ? 0.6 : 1);   // まだ攻撃が効かない合図
+            this.setAlpha((this.t % 10 < 5) ? 0.6 : 1);   // コアはまだ攻撃が効かない
         } else {
             this.setAlpha(1);
+        }
+        /* パーツが弾いたときの点滅は個別に */
+        for (i = 0; i < 4; i++) {
+            if (this.parts[i].flash > 0) {
+                this.parts[i].flash--;
+                this.parts[i].opacity = 0.5;
+            }
         }
         return true;
     }

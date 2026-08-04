@@ -28,6 +28,29 @@
  *     ボタン入力を台本化して差し替える(左→右→上→下を繰り返す)。
  *     自機の移動・画面端でのクランプ・ショットが正しいかを画面で確認するため。
  */
+/*
+ * TEST_MB_COUNT: 中ボスの合体猶予中にコアへ何発当てられるかを実測する。
+ *   コアのHPを事実上無限にして命中数を数え、HUDに出す。
+ *   自機は TEST_MB_DX / TEST_MB_Y で指定した位置に固定する
+ *   (ブラウザ版 tools/measure_midboss.js と同じ考え方)。
+ */
+#ifdef TEST_MB_COUNT
+  #undef MB_HP_MERGE
+  #define MB_HP_MERGE 9999
+  #define TEST_MB_POS 1
+static int mbHitCount;
+#endif
+
+/* TEST_MB_POS: 中ボスが居る間、自機を指定位置に固定する(実測・検証用) */
+#ifdef TEST_MB_POS
+  #ifndef TEST_MB_DX
+    #define TEST_MB_DX 13        /* 実測での最良位置 */
+  #endif
+  #ifndef TEST_MB_Y
+    #define TEST_MB_Y 160
+  #endif
+#endif
+
 #if defined(TEST_GROUND)
   /* 地上物の確認用: 中ボスを出さず、ステージを通常どおり流す */
   #define MIDBOSS_AT(s) 0
@@ -309,14 +332,20 @@ static void player_shoot(void)
     int cx = cx_of(player.x, SPR_PLAYER);
     int top = FX2I(player.y) + 2;
 
+    /*
+     * 発射位置のオフセットは「自機のどこから出るか」なのでスプライト基準 = x0.5。
+     * (Web版 ±11/±14 → ±6/±7。以前は他の距離と同じ x0.8 にしていたため、
+     *  16px の自機の外側から弾が出ていた)
+     * 斜め弾の vx は画面上の速度なので従来どおり x0.8。
+     */
     add_pbullet(cx, top, 0);
     if (gs.power >= 2) {
-        add_pbullet(cx - 9, top + 5, 0);
-        add_pbullet(cx + 9, top + 5, 0);
+        add_pbullet(cx - 6, top + 3, 0);
+        add_pbullet(cx + 6, top + 3, 0);
     }
     if (gs.power >= 3) {
-        add_pbullet(cx - 11, top + 8, -FP(1.44));
-        add_pbullet(cx + 11, top + 8,  FP(1.44));
+        add_pbullet(cx - 7, top + 5, -FP(1.44));
+        add_pbullet(cx + 7, top + 5,  FP(1.44));
     }
     snd_se(SE_SHOT);
 }
@@ -359,6 +388,13 @@ static void player_update(void)
         player.touching = false;
     }
 
+#ifdef TEST_MB_POS
+    /* 測定・検証用: 中ボスが居る間は指定位置に固定して撃ちっぱなし */
+    if (midBoss.active) {
+        player.x = midBoss.cx + I2FX(TEST_MB_DX) - I2FX(w / 2);
+        player.y = I2FX(TEST_MB_Y);
+    }
+#endif
     /* 動作確認ビルド: ボスに自動で照準を合わせる(確実に進行させるため) */
     if (T_AUTOAIM && boss.active) {
         s32 target = boss.x + I2FX(boss.w / 2) - I2FX(w / 2);
@@ -731,42 +767,57 @@ static void midboss_start(void)
     midBoss.active = true;
     midBoss.state = MB_ENTER;
     midBoss.result = MBR_NONE;
-    midBoss.hp = MB_HP;
+    midBoss.hp = MB_HP_MERGE;
     midBoss.cx = I2FX(FIELD_W / 2);
     midBoss.cy = -I2FX(spr_h(SPR_MIDCORE) / 2);
-    midBoss.partR = I2FX(MB_RING_R);
 }
 
-static bool midboss_vulnerable(void)
+/* 画面外の出現位置(コア中心からの距離)を確定させる */
+static void midboss_set_starts(void)
+{
+    int pw = spr_w(SPR_MIDPART), ph = spr_h(SPR_MIDPART);
+    midBoss.startDist[0] = midBoss.cy + I2FX(ph / 2);                      /* 上の外 */
+    midBoss.startDist[1] = I2FX(FIELD_H + ph / 2) - midBoss.cy;            /* 下の外 */
+    midBoss.startDist[2] = midBoss.cx + I2FX(pw / 2);                      /* 左の外 */
+    midBoss.startDist[3] = I2FX(FIELD_W + pw / 2) - midBoss.cx;            /* 右の外 */
+}
+
+static void midboss_set_dist(s32 d)
+{
+    int i;
+    for (i = 0; i < 4; i++) midBoss.partDist[i] = d;
+}
+
+/* コアに攻撃が通る状態か(パーツの移動開始前は効かない) */
+static bool midboss_core_vulnerable(void)
 {
     return midBoss.active &&
            (midBoss.state == MB_MERGE || midBoss.state == MB_FULL);
 }
 
-/* i=0..3 がパーツ、i=4 がコア。中心座標と半径を返す */
-static void midboss_target(int i, int *tx, int *ty, int *tr)
+/* パーツ i の中心座標 */
+static void midboss_part_pos(int i, int *px, int *py)
 {
-    if (i >= 4) {
-        *tx = FX2I(midBoss.cx);
-        *ty = FX2I(midBoss.cy);
-        *tr = spr_w(SPR_MIDCORE) * 36 / 100;
-    } else {
-        int r = FX2I(midBoss.partR);
-        *tx = FX2I(midBoss.cx) + MB_DIRS[i][0] * r;
-        *ty = FX2I(midBoss.cy) + MB_DIRS[i][1] * r;
-        *tr = spr_w(SPR_MIDPART) * 36 / 100;
-    }
+    int d = FX2I(midBoss.partDist[i]);
+    *px = FX2I(midBoss.cx) + MB_DIRS[i][0] * d;
+    *py = FX2I(midBoss.cy) + MB_DIRS[i][1] * d;
 }
 
-static int midboss_target_count(void)
+/* コアの当たり判定 */
+static void midboss_core_target(int *tx, int *ty, int *tr)
 {
-    return midBoss.partsVisible ? 5 : 1;
+    *tx = FX2I(midBoss.cx);
+    *ty = FX2I(midBoss.cy);
+    *tr = spr_w(SPR_MIDCORE) * 36 / 100;
 }
 
 /* 戻り値: 撃破したら MBR_BONUS / MBR_NORMAL、まだなら MBR_NONE */
 static int midboss_damage(int n)
 {
-    if (!midboss_vulnerable()) return MBR_NONE;
+    if (!midboss_core_vulnerable()) return MBR_NONE;
+#ifdef TEST_MB_COUNT
+    if (midBoss.state == MB_MERGE) mbHitCount++;
+#endif
     midBoss.hp -= n;
     midBoss.flash = 3;
     if (midBoss.hp > 0) {
@@ -785,33 +836,50 @@ static int midboss_damage(int n)
 static bool midboss_update(void)
 {
     int t = ++midBoss.t;
+    int i;
 
     switch (midBoss.state) {
     case MB_ENTER:
         midBoss.cy += MB_ENTER_SPEED;
         if (FX2I(midBoss.cy) >= MB_CORE_CY) {
             midBoss.cy = I2FX(MB_CORE_CY);
-            midBoss.state = MB_HOLD;
+            midBoss.state = MB_FLYIN;
             midBoss.t = 0;
-            midBoss.partsVisible = true;      /* 四方にパーツが出現 */
-            midBoss.partR = I2FX(MB_RING_R);
+            midBoss.partsVisible = true;
+            midboss_set_starts();
+            for (i = 0; i < 4; i++) midBoss.partDist[i] = midBoss.startDist[i];
         }
         break;
+
+    case MB_FLYIN: {
+        /* 四方の画面外から静止位置へ。この間は当たり判定なし */
+        s32 k = (t > MB_FLYIN_FRAMES) ? MB_FLYIN_FRAMES : t;
+        for (i = 0; i < 4; i++) {
+            s32 a = midBoss.startDist[i], b = I2FX(MB_RING_R);
+            midBoss.partDist[i] = a + (b - a) * k / MB_FLYIN_FRAMES;
+        }
+        if (t >= MB_FLYIN_FRAMES) {
+            midboss_set_dist(I2FX(MB_RING_R));
+            midBoss.state = MB_HOLD;
+            midBoss.t = 0;
+            midBoss.partsSolid = true;      /* ここから障害物になる */
+        }
+        break;
+    }
 
     case MB_HOLD:
         if (t >= MB_HOLD_FRAMES) { midBoss.state = MB_MERGE; midBoss.t = 0; }
         break;
 
     case MB_MERGE: {
-        /* ringR から attachR へ線形に寄せる */
         s32 k = (t > MB_MERGE_FRAMES) ? MB_MERGE_FRAMES : t;
-        midBoss.partR = I2FX(MB_RING_R) +
-                        (I2FX(MB_ATTACH_R) - I2FX(MB_RING_R)) * k / MB_MERGE_FRAMES;
+        midboss_set_dist(I2FX(MB_RING_R) +
+            (I2FX(MB_ATTACH_R) - I2FX(MB_RING_R)) * k / MB_MERGE_FRAMES);
         if (t >= MB_MERGE_FRAMES) {
-            midBoss.state = MB_FULL;          /* 合体成立。HPを戻す */
+            midBoss.state = MB_FULL;          /* 合体成立。HPを合体後の値に */
             midBoss.t = 0;
-            midBoss.hp = MB_HP;
-            midBoss.partR = I2FX(MB_ATTACH_R);
+            midBoss.hp = MB_HP_FULL;
+            midboss_set_dist(I2FX(MB_ATTACH_R));
             midBoss.shootTimer = 30;
         }
         break;
@@ -832,6 +900,7 @@ static bool midboss_update(void)
         break;
 
     case MB_DYING:
+        midBoss.partsSolid = false;
         if (midBoss.result == MBR_ESCAPED) {
             midBoss.cy -= FP(2.4);
             if (FX2I(midBoss.cy) < -spr_h(SPR_MIDCORE)) return false;
@@ -940,16 +1009,29 @@ static void collide(void)
             continue;
         }
 
-        /* 自機弾 vs 中ボス(コアと4パーツのどこに当たっても1ダメージ) */
-        if (midboss_vulnerable()) {
-            int n = midboss_target_count(), k, tx, ty, tr;
-            for (k = 0; k < n; k++) {
-                int idx = (k == n - 1) ? 4 : k;      /* 最後がコア */
-                midboss_target(idx, &tx, &ty, &tr);
-                if (!hit_circle(bx, by, b->r, tx, ty, tr)) continue;
-                b->active = false;
-                on_midboss_hit(midboss_damage(1));
-                break;
+        /*
+         * 自機弾 vs 中ボス。
+         * パーツは常に無敵の障害物なので先に判定してショットを弾く
+         * (ダメージにはならない)。ダメージが通るのはコアだけ。
+         */
+        if (midBoss.active) {
+            int k, tx, ty, tr, pr = spr_w(SPR_MIDPART) * 36 / 100;
+            bool blocked = false;
+            if (midBoss.partsSolid) {
+                for (k = 0; k < 4; k++) {
+                    midboss_part_pos(k, &tx, &ty);
+                    if (!hit_circle(bx, by, b->r, tx, ty, pr)) continue;
+                    b->active = false;
+                    blocked = true;
+                    break;
+                }
+            }
+            if (!blocked && midboss_core_vulnerable()) {
+                midboss_core_target(&tx, &ty, &tr);
+                if (hit_circle(bx, by, b->r, tx, ty, tr)) {
+                    b->active = false;
+                    on_midboss_hit(midboss_damage(1));
+                }
             }
         }
     }
@@ -990,12 +1072,24 @@ static void collide(void)
             kill_player();
             return;
         }
-        /* 中ボス本体 vs 自機。無敵演出中は当たらない(理不尽を避ける) */
-        if (midboss_vulnerable()) {
-            int n = midboss_target_count(), k, tx, ty, tr;
-            for (k = 0; k < n; k++) {
-                int idx = (k == n - 1) ? 4 : k;
-                midboss_target(idx, &tx, &ty, &tr);
+        /*
+         * 中ボス vs 自機。
+         * パーツは静止した時点から障害物になるので、触れると自機がやられる。
+         * コアは攻撃が通る状態(=合体開始後)のみ当たる。飛来中は判定なし。
+         */
+        if (midBoss.active) {
+            int k, tx, ty, tr, pr = spr_w(SPR_MIDPART) * 36 / 100;
+            if (midBoss.partsSolid) {
+                for (k = 0; k < 4; k++) {
+                    midboss_part_pos(k, &tx, &ty);
+                    if (hit_circle(tx, ty, pr * 4 / 5, px, py, PLAYER_HIT_R + 1)) {
+                        kill_player();
+                        return;
+                    }
+                }
+            }
+            if (midboss_core_vulnerable()) {
+                midboss_core_target(&tx, &ty, &tr);
                 if (hit_circle(tx, ty, tr * 4 / 5, px, py, PLAYER_HIT_R + 1)) {
                     kill_player();
                     return;
@@ -1233,6 +1327,11 @@ static void draw_hud(void)
 
     txt_put(SCREEN_TOP, 20, 0, "LIVES", TXT_RED);
     txt_num(SCREEN_TOP, 26, 0, (u32)(gs.lives < 0 ? 0 : gs.lives), 1, TXT_RED);
+#ifdef TEST_MB_COUNT
+    txt_put(SCREEN_TOP, 0, 3, "MERGE HITS", TXT_CYAN);
+    txt_num(SCREEN_TOP, 11, 3, (u32)mbHitCount, 3, TXT_CYAN);
+    txt_put(SCREEN_TOP, 16, 3, midBoss.active ? "ACTIVE" : "      ", TXT_GREY);
+#endif
     txt_put(SCREEN_TOP, 20, 1, "PW", TXT_GOLD);
     txt_num(SCREEN_TOP, 23, 1, (u32)gs.power, 1, TXT_GOLD);
     txt_put(SCREEN_TOP, 24, 1, "/", TXT_GOLD);
@@ -1330,13 +1429,13 @@ static void draw_entities(void)
             int k, tx, ty, tr;
             if (midBoss.partsVisible) {
                 for (k = 0; k < 4; k++) {
-                    midboss_target(k, &tx, &ty, &tr);
+                    midboss_part_pos(k, &tx, &ty);
                     spr_draw(SPR_MIDPART, fr,
                              tx - spr_w(SPR_MIDPART) / 2,
                              ty - spr_h(SPR_MIDPART) / 2);
                 }
             }
-            midboss_target(4, &tx, &ty, &tr);
+            midboss_core_target(&tx, &ty, &tr);
             spr_draw(SPR_MIDCORE, fr,
                      tx - spr_w(SPR_MIDCORE) / 2, ty - spr_h(SPR_MIDCORE) / 2);
         }

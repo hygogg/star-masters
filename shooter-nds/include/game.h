@@ -71,8 +71,15 @@
  *   長さ(画面上の距離) は x0.8、
  *   パーツの合体位置はスプライト同士の噛み合わせなので x0.5。
  */
-#define MB_HP             8          /* 破壊に必要な被弾数(合体前・合体後とも) */
-#define MB_HOLD_FRAMES   60          /* パーツ出現後の静止(1秒)。この間は無敵 */
+/*
+ * 必要被弾数。パーツは常に無敵でショットを弾くため、狙えるのはコアだけ。
+ * さらに下側のパーツがコアの中央を遮るので、後方から撃つだけでは足りない。
+ * MB_HP_MERGE は実測で決めた値(README とブラウザ版の tools/measure_midboss.js 参照)。
+ */
+#define MB_HP_MERGE      12          /* 合体前(ボーナス猶予中)に必要な被弾数 */
+#define MB_HP_FULL        8          /* 合体後に必要な被弾数(時間制限なし) */
+#define MB_FLYIN_FRAMES  45          /* パーツが画面外から静止位置へ来る時間 */
+#define MB_HOLD_FRAMES   60          /* 静止(1秒)。ここからパーツに当たり判定 */
 #define MB_MERGE_FRAMES  60          /* 移動開始から合体まで(1秒)。ボーナスの猶予 */
 #define MB_CORE_CY      120          /* コアが止まる中心y (Web 150 * 0.8) */
 #define MB_RING_R        64          /* 静止中のパーツ位置 (Web 80 * 0.8) */
@@ -171,10 +178,11 @@ typedef struct {
 
 /* ---------- 中ボス ---------- */
 typedef enum {
-    MB_ENTER = 0,   /* コアが降下 (無敵) */
-    MB_HOLD,        /* 四方にパーツが出現して静止 (無敵) */
-    MB_MERGE,       /* パーツがコアへ集まる (有効・ここで壊すとボーナス) */
-    MB_FULL,        /* 合体完了 (有効) */
+    MB_ENTER = 0,   /* コアが降下 (コア無敵) */
+    MB_FLYIN,       /* パーツが画面外から飛来 (当たり判定なし) */
+    MB_HOLD,        /* 四方で静止 (パーツは障害物になる。コアはまだ無敵) */
+    MB_MERGE,       /* パーツがコアへ集まる (コアに攻撃が通る・壊すとボーナス) */
+    MB_FULL,        /* 合体完了 (コアに攻撃が通る) */
     MB_DYING
 } MidBossState;
 
@@ -187,8 +195,10 @@ typedef struct {
     int  t;
     int  hp;
     s32  cx, cy;        /* コア中心 (24.8) */
-    s32  partR;         /* 現在のパーツ距離 (24.8) */
+    s32  partDist[4];   /* パーツのコア中心からの距離 (24.8)。方向ごとに独立 */
+    s32  startDist[4];  /* 飛来開始時の距離(画面外) */
     bool partsVisible;
+    bool partsSolid;    /* 静止してから true。以降ずっと障害物 */
     int  shootTimer;
     u8   flash;
 } MidBoss;

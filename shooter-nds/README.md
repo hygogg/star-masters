@@ -59,6 +59,12 @@ docker run --rm -v "$PWD:/w" -w /w devkitpro/devkitarm:latest make CFLAGS_EXTRA=
 
 # 中ボスを出さずステージを流す(地上物の確認用)
 docker run --rm -v "$PWD:/w" -w /w devkitpro/devkitarm:latest make CFLAGS_EXTRA=-DTEST_GROUND
+
+# 中ボス戦で自機を最良位置に固定する(ボーナス達成の確認用)
+docker run --rm -v "$PWD:/w" -w /w devkitpro/devkitarm:latest make CFLAGS_EXTRA="-DTEST_FAST -DTEST_MB_POS"
+
+# 合体猶予中にコアへ何発当たるか実測する(HUDに MERGE HITS を表示)
+docker run --rm -v "$PWD:/w" -w /w devkitpro/devkitarm:latest make CFLAGS_EXTRA="-DTEST_FAST -DTEST_MB_COUNT -DTEST_MB_DX=13 -DTEST_MB_Y=160"
 ```
 
 `TEST_FAST` ならタイトル→3ステージ→各ボス→エンディングを数分で通せる。
@@ -160,10 +166,22 @@ Web版用のアセット(`../shooter/assets/`)は上記スクリプトでは変�
 
 - **地上物**: 背景と同速度で流れる固定設置物。通常ショットで破壊可。
   DSではスプライト優先度3で描き、他のスプライトより奥に置いている
-- **中ボス**: コアの四方に4パーツが出現 → 1秒静止(無敵) → 1秒で合体。
-  合体までに8発当てると50000点、合体後に8発当てると1000点。
+- **中ボス**: パーツが画面外から飛来 → コアの四方で1秒静止 → 1秒で合体。
+  パーツは静止した時点から**最後まで無敵の障害物**(ショットを弾き、接触で自機が死ぬ)。
+  狙えるのはコアだけで、合体までに **12発**当てると50000点、合体後に8発で1000点。
   パーツの合体位置は `MB_ATTACH_R`(12px)で、これはスプライト同士の
   噛み合わせなのでブラウザ版の x0.5(他の距離は x0.8)
+
+  必要弾数はDS版だけ12発(ブラウザ版は14発)。melonDS上での実測値:
+
+  | 自機の位置 | 合体猶予中にコアへ当たる数 |
+  |---|---|
+  | 後方中央 (dx=0, y=280) | **0発**(下パーツが完全に遮る) |
+  | 中間 (dx=6, y=220) | 9発 |
+  | 踏み込み (dx=13, y=160) | **19発** |
+
+  測定は `-DTEST_MB_COUNT -DTEST_MB_DX=n -DTEST_MB_Y=n` でビルドすると
+  HUDに `MERGE HITS` が出る(コアのHPは事実上無限になる)。
 
 ## 難易度・ステージ構成の調整
 

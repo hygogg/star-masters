@@ -469,15 +469,28 @@ function makeStageScene(stageIdx) {
                 scene.boss.damage(1);
                 continue;
             }
-            /* 自機弾 vs 中ボス(コアと4パーツのどこに当たっても1ダメージ) */
-            if (scene.midBoss && scene.midBoss.vulnerable()) {
-                var tg = scene.midBoss.targets(), m;
-                for (m = 0; m < tg.length; m++) {
-                    if (!hitCircle(b.cx(), b.cy(), b.r, tg[m].x, tg[m].y, tg[m].r)) { continue; }
+            /*
+             * 自機弾 vs 中ボス。
+             * パーツは常に無敵の障害物なので、先に判定してショットを弾く
+             * (ダメージにはならない)。ダメージが通るのはコアだけ。
+             */
+            if (scene.midBoss) {
+                var mb = scene.midBoss, pt = mb.partTargets(), m, blocked = false;
+                for (m = 0; m < pt.length; m++) {
+                    if (!hitCircle(b.cx(), b.cy(), b.r, pt[m].x, pt[m].y, pt[m].r)) { continue; }
+                    mb.deflect(pt[m].idx);
                     gPlayerBullet.removeChild(b);
                     scene.playerBullets.splice(i, 1);
-                    onMidBossHit(scene.midBoss.damage(1));
+                    blocked = true;
                     break;
+                }
+                if (!blocked && mb.coreVulnerable()) {
+                    var ct = mb.coreTarget();
+                    if (hitCircle(b.cx(), b.cy(), b.r, ct.x, ct.y, ct.r)) {
+                        gPlayerBullet.removeChild(b);
+                        scene.playerBullets.splice(i, 1);
+                        onMidBossHit(mb.damage(1));
+                    }
                 }
             }
         }
@@ -513,11 +526,22 @@ function makeStageScene(stageIdx) {
                 killPlayer();
                 return;
             }
-            /* 中ボス本体 vs 自機。無敵演出中は当たらない(理不尽を避ける) */
-            if (scene.midBoss && scene.midBoss.vulnerable()) {
-                var mt = scene.midBoss.targets(), mi;
-                for (mi = 0; mi < mt.length; mi++) {
-                    if (hitCircle(mt[mi].x, mt[mi].y, mt[mi].r * 0.8, px, py, pr + 2)) {
+            /*
+             * 中ボス vs 自機。
+             * パーツは静止した時点から障害物になるので、触れると自機がやられる。
+             * コアは攻撃が通る状態(=合体開始後)のみ当たる。飛来中は判定なし。
+             */
+            if (scene.midBoss) {
+                var mb2 = scene.midBoss, pt2 = mb2.partTargets(), mi;
+                for (mi = 0; mi < pt2.length; mi++) {
+                    if (hitCircle(pt2[mi].x, pt2[mi].y, pt2[mi].r * 0.8, px, py, pr + 2)) {
+                        killPlayer();
+                        return;
+                    }
+                }
+                if (mb2.coreVulnerable()) {
+                    var ct2 = mb2.coreTarget();
+                    if (hitCircle(ct2.x, ct2.y, ct2.r * 0.8, px, py, pr + 2)) {
                         killPlayer();
                         return;
                     }
