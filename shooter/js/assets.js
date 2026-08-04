@@ -18,6 +18,12 @@ var ASSETS = {
         enemy2:        { path: 'assets/img/enemy2.png',        fw: 32, fh: 32, frames: 2 },
         enemy3:        { path: 'assets/img/enemy3.png',        fw: 32, fh: 32, frames: 2 },
         midenemy:      { path: 'assets/img/midenemy.png',      fw: 48, fh: 48, frames: 2 },
+        /* 地上物(背景と一緒にスクロールする固定設置物) */
+        gturret:       { path: 'assets/img/gturret.png',       fw: 32, fh: 32, frames: 2 },
+        gradar:        { path: 'assets/img/gradar.png',        fw: 32, fh: 32, frames: 2 },
+        /* 中ボス: コアと、四方から合体する4つのパーツ */
+        midcore:       { path: 'assets/img/midcore.png',       fw: 64, fh: 64, frames: 2 },
+        midpart:       { path: 'assets/img/midpart.png',       fw: 32, fh: 32, frames: 2 },
         boss1:         { path: 'assets/img/boss1.png',         fw: 96, fh: 96, frames: 2 },
         boss2:         { path: 'assets/img/boss2.png',         fw: 96, fh: 96, frames: 2 },
         boss3:         { path: 'assets/img/boss3.png',         fw: 96, fh: 96, frames: 2 },
@@ -34,6 +40,7 @@ var ASSETS = {
         stage1: 'assets/bgm/stage1.wav',
         stage2: 'assets/bgm/stage2.wav',
         stage3: 'assets/bgm/stage3.wav',
+        midboss: 'assets/bgm/midboss.wav',
         boss:   'assets/bgm/boss.wav',
         ending: 'assets/bgm/ending.wav'
     },
@@ -45,7 +52,8 @@ var ASSETS = {
         powerup:        'assets/se/powerup.wav',
         boss_explosion: 'assets/se/boss_explosion.wav',
         start:          'assets/se/start.wav',
-        clear:          'assets/se/clear.wav'
+        clear:          'assets/se/clear.wav',
+        fanfare:        'assets/se/fanfare.wav'   /* 中ボス撃破ボーナス */
     }
 };
 

@@ -66,13 +66,31 @@
 /* 敵弾が多すぎるときボスの追加発射を抑制する閾値 (Web版は140) */
 #define EBULLET_CHOKE  64
 
+/* ---------- 中ボス ----------
+ * Web版 js/config.js の MIDBOSS を移植。
+ *   長さ(画面上の距離) は x0.8、
+ *   パーツの合体位置はスプライト同士の噛み合わせなので x0.5。
+ */
+#define MB_HP             8          /* 破壊に必要な被弾数(合体前・合体後とも) */
+#define MB_HOLD_FRAMES   60          /* パーツ出現後の静止(1秒)。この間は無敵 */
+#define MB_MERGE_FRAMES  60          /* 移動開始から合体まで(1秒)。ボーナスの猶予 */
+#define MB_CORE_CY      120          /* コアが止まる中心y (Web 150 * 0.8) */
+#define MB_RING_R        64          /* 静止中のパーツ位置 (Web 80 * 0.8) */
+#define MB_ATTACH_R      12          /* 合体後のパーツ位置 (Web 24 * 0.5) */
+#define MB_BONUS_SCORE 50000
+#define MB_NORMAL_SCORE 1000
+#define MB_FULL_TIMEOUT 1200         /* 倒せないと去る(進行不能の防止) */
+#define MB_SHOOT_EVERY   50
+#define MB_ENTER_SPEED   FP(1.28)    /* Web 1.6 * 0.8 */
+
 /* ---------- 敵の移動パターン ---------- */
 typedef enum {
     PAT_STRAIGHT = 0,
     PAT_SINE,
     PAT_SWOOP_L,
     PAT_SWOOP_R,
-    PAT_HOVER
+    PAT_HOVER,
+    PAT_GROUND        /* 地上物: 背景と同じ速度で流れる */
 } Pattern;
 
 /* ---------- スプライト種別 (gfx.c の spr_defs[] と順序を一致させる) ---------- */
@@ -82,6 +100,10 @@ typedef enum {
     SPR_ENEMY2,
     SPR_ENEMY3,
     SPR_MIDENEMY,
+    SPR_GTURRET,      /* 地上物: 砲台 */
+    SPR_GRADAR,       /* 地上物: レーダー */
+    SPR_MIDCORE,      /* 中ボス: コア */
+    SPR_MIDPART,      /* 中ボス: 合体パーツ */
     SPR_BOSS1,
     SPR_BOSS2,
     SPR_BOSS3,
@@ -147,6 +169,30 @@ typedef struct {
     int  t;
 } Effect;                   /* 爆発 */
 
+/* ---------- 中ボス ---------- */
+typedef enum {
+    MB_ENTER = 0,   /* コアが降下 (無敵) */
+    MB_HOLD,        /* 四方にパーツが出現して静止 (無敵) */
+    MB_MERGE,       /* パーツがコアへ集まる (有効・ここで壊すとボーナス) */
+    MB_FULL,        /* 合体完了 (有効) */
+    MB_DYING
+} MidBossState;
+
+typedef enum { MBR_NONE = 0, MBR_BONUS, MBR_NORMAL, MBR_ESCAPED } MidBossResult;
+
+typedef struct {
+    bool active;
+    u8   state;
+    u8   result;
+    int  t;
+    int  hp;
+    s32  cx, cy;        /* コア中心 (24.8) */
+    s32  partR;         /* 現在のパーツ距離 (24.8) */
+    bool partsVisible;
+    int  shootTimer;
+    u8   flash;
+} MidBoss;
+
 typedef struct {
     bool active;
     s32  x, y;
@@ -159,6 +205,7 @@ typedef enum {
     ST_TITLE = 0,
     ST_INTRO,
     ST_PLAY,
+    ST_MIDBOSS,
     ST_WARNING,
     ST_BOSS,
     ST_CLEAR,

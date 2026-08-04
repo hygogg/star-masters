@@ -28,6 +28,8 @@ void gfx_bg_visible(bool on);
 void spr_begin(void);
 /* x,y はプレイフィールド座標でのスプライト左上。画面をまたぐ場合は両方に描く */
 void spr_draw(int id, int frame, int x, int y);
+/* 優先度つき。数値が大きいほど奥。地上物は 3 を使って他のスプライトの奥に置く */
+void spr_draw_prio(int id, int frame, int x, int y, int prio);
 void spr_end(void);
 int  spr_w(int id);
 int  spr_h(int id);

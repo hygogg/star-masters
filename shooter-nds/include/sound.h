@@ -17,6 +17,7 @@ typedef enum {
     BGM_STAGE1,
     BGM_STAGE2,
     BGM_STAGE3,
+    BGM_MIDBOSS,
     BGM_BOSS,
     BGM_ENDING,
     BGM_COUNT
@@ -31,6 +32,7 @@ typedef enum {
     SE_BOSS_EXPLOSION,
     SE_START,
     SE_CLEAR,
+    SE_FANFARE,
     SE_COUNT
 } SeId;
 

@@ -449,6 +449,60 @@ def compose_boss():
     return s
 
 
+def compose_midboss():
+    """8 bars, 92 BPM, F minor w/ tritone+chromatic colour. Ominous mid-boss
+    suspense: pulsing low triangle bass, sparse minor-2nd/tritone stabs,
+    heartbeat kick, near-empty percussion. Sparse and creeping on purpose --
+    the dreadful drop before the fight, not the fight itself. Loops."""
+    s = Song(92, 8)
+    # creeping quarter-pulse bass ostinato; tritone poke on beat 2,
+    # chromatic Ab-G-Gb-F descent through the back half
+    bass = [
+        ("F2", "F2", "B2", "F2"),
+        ("F2", "F2", "Gb2", "F2"),
+        ("F2", "F2", "B2", "F2"),
+        ("F2", "Gb2", "E2", "F2"),
+        ("Ab2", "Ab2", "D3", "Ab2"),
+        ("G2", "G2", "Db3", "G2"),
+        ("Gb2", "Gb2", "C3", "Gb2"),
+        ("F2", "F2", "E2", "F2"),
+    ]
+    for bar, notes in enumerate(bass):
+        for b, nm in enumerate(notes):
+            s.tone(bar, b, 0.9, nm, "tri", BASS, sustain=0.6, decay=2.0)
+    # sparse dissonant stabs: minor-2nd clusters and tritones, thin nasty duty
+    stabs = [
+        (1, 1.5, ("C5", "Db5")),
+        (2, 2.5, ("B4", "F5")),
+        (3, 3.0, ("E5", "F5")),
+        (5, 1.5, ("Db5", "D5")),
+        (6, 2.5, ("C5", "Gb5")),
+        (7, 3.5, ("B4", "C5")),
+    ]
+    for bar, beat, pair in stabs:
+        for nm in pair:
+            s.tone(bar, beat, 0.28, nm, "sq", 0.17, duty=0.125, vib=False)
+    # slow keening lead: chromatic semitone creep, all tritone tensions
+    mel = [
+        (2, 0, 3.75, "C5"),
+        (3, 0, 3.75, "B4"),
+        (4, 0, 2.0, "Eb5"), (4, 2, 1.75, "D5"),
+        (5, 0, 3.75, "Db5"),
+        (6, 0, 2.0, "C5"), (6, 2, 1.75, "B4"),
+    ]
+    for bar, beat, dur, note in mel:
+        s.tone(bar, beat, dur, note, "sq", 0.22, duty=0.5)
+    # heartbeat kick, lone dry snares, two faint hat ticks. restraint.
+    for bar in range(8):
+        s.kick(bar, 0)
+        s.kick(bar, 0.5, vol=0.4)
+    s.hat(3, 2.5, vol=0.06)
+    s.hat(7, 2.5, vol=0.06)
+    s.snare(3, 3.5, vol=0.2)
+    s.snare(7, 3.5, vol=0.2)
+    return s
+
+
 def compose_ending():
     """8 bars, 100 BPM, F major. Warm triumphant ballad, gentle arps. Loops."""
     s = Song(100, 8)
@@ -708,6 +762,72 @@ def se_clear():
     return buf, 0.80
 
 
+def se_fanfare():
+    """~1.25 s big-bonus fanfare: triple-tongued G5 pickup, leap to C6/E6,
+    held bright C-major chord with thin-duty octave sparkles. One-shot,
+    decays into real silence (last 50 ms empty) so it cannot read as a loop.
+    Brighter and slightly louder than se_clear -- the 50000pt reward."""
+    dur = 1.25
+    n = int(dur * SR)
+    buf = [0.0] * n
+
+    def blip(note, st, d, vol=1.0, duty=0.5, decay=6.0):
+        f0 = FR(N(note))
+        n0 = int(st * SR)
+        n1 = min(n, n0 + int(d * SR))
+        ph = 0.0
+        for i in range(n0, n1):
+            t = (i - n0) / SR
+            f = f0 * (1.0 + (0.005 * math.sin(TWO_PI * 6.0 * t) if t > 0.1 else 0.0))
+            ph += f / SR
+            s = 1.0 if (ph - int(ph)) < duty else -1.0
+            env = math.exp(-t * decay)
+            if i - n0 < 20:
+                env *= (i - n0) / 20.0
+            rem = n1 - 1 - i
+            if rem < 100:
+                env *= rem / 100.0
+            buf[i] += s * env * vol
+
+    # "ta-ta-ta!" triple-tongued pickup, then the rising leap
+    blip("G5", 0.00, 0.07)
+    blip("G5", 0.08, 0.07)
+    blip("G5", 0.16, 0.07)
+    blip("C6", 0.24, 0.11, decay=5.0)
+    blip("E6", 0.34, 0.11, decay=5.0)
+    # held triumphant chord, voiced high (ends 50 ms early -> true silence
+    # at the tail); thin duty = bright harmonics
+    chord_end = dur - 0.05
+    for note, vol in (("G5", 0.42), ("C6", 0.60), ("E6", 0.60),
+                      ("G6", 0.50)):
+        blip(note, 0.46, chord_end - 0.46, vol=vol, duty=0.25, decay=3.8)
+    # glittering echo blips over the chord, thin sparkle duty
+    for st, note, vol in ((0.46, "C7", 0.30), (0.58, "E7", 0.26),
+                          (0.70, "C7", 0.24), (0.82, "E7", 0.20),
+                          (0.94, "G6", 0.18)):
+        blip(note, st, 0.09, vol=vol, duty=0.125, decay=8.0)
+    # triangle bass root under the chord (kept light so it stays bright)
+    ph = 0.0
+    fb = FR(N("C3"))
+    n0 = int(0.46 * SR)
+    n1 = int(chord_end * SR)
+    for i in range(n0, n1):
+        t = (i - n0) / SR
+        ph += fb / SR
+        p = ph - int(ph)
+        s = 4.0 * abs(p - 0.5) - 1.0
+        env = 0.45 * math.exp(-t * 3.0)
+        if i - n0 < 40:
+            env *= (i - n0) / 40.0
+        rem = n1 - 1 - i
+        if rem < 100:
+            env *= rem / 100.0
+        buf[i] += s * env
+    # 0.83 peak: louder than se_clear (0.80) but leaves headroom for the DS
+    # conversion's FIR overshoot (tools/generate_nds_audio.py, peak<0.95).
+    return buf, 0.83
+
+
 # ============================================================ build + verify
 
 BGM_SPECS = {
@@ -719,6 +839,7 @@ BGM_SPECS = {
     # ending has a dense sustained texture (high RMS/peak ratio); a lower peak
     # target loudness-matches it to the other tracks. still inside 0.7-0.9.
     "ending.wav": dict(bpm=100, bars=8, fn=compose_ending, peak=0.72),
+    "midboss.wav": dict(bpm=92, bars=8, fn=compose_midboss),
 }
 
 SE_SPECS = {
@@ -730,6 +851,7 @@ SE_SPECS = {
     "boss_explosion.wav": dict(dur=1.30, fn=se_boss_explosion),
     "start.wav": dict(dur=0.30, fn=se_start),
     "clear.wav": dict(dur=1.40, fn=se_clear),
+    "fanfare.wav": dict(dur=1.25, fn=se_fanfare),
 }
 
 BGM_PEAK_TARGET = 0.85

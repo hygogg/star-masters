@@ -172,8 +172,10 @@ function makeStageScene(stageIdx) {
     scene.paused = false;
 
     var bg = makeScrollBg(scene, stage.bg, stage.scroll);
+    scene.scrollSpeed = stage.scroll;   /* 地上物がこの速度で流れる */
 
     /* 描画順を決めるグループ */
+    var gGround = new Group();          /* 地上物。他のスプライトより奥に描く */
     var gPlayerBullet = new Group();
     var gEnemy = new Group();
     var gItem = new Group();
@@ -181,7 +183,7 @@ function makeStageScene(stageIdx) {
     var gEnemyBullet = new Group();
     var gEffect = new Group();
     var gUi = new Group();
-    [gPlayerBullet, gEnemy, gItem, gPlayer, gEnemyBullet, gEffect, gUi]
+    [gGround, gPlayerBullet, gEnemy, gItem, gPlayer, gEnemyBullet, gEffect, gUi]
         .forEach(function (g) { scene.addChild(g); });
 
     /* エンティティ管理 */
@@ -192,7 +194,10 @@ function makeStageScene(stageIdx) {
     scene.effects = [];
     scene.boss = null;
 
-    scene.addEnemy = function (e) { this.enemies.push(e); gEnemy.addChild(e); };
+    scene.addEnemy = function (e) {
+        this.enemies.push(e);
+        (e.pattern === 'ground' ? gGround : gEnemy).addChild(e);
+    };
     scene.addEnemyBullet = function (b) { this.enemyBullets.push(b); gEnemyBullet.addChild(b); };
     scene.addPlayerBullet = function (b) { this.playerBullets.push(b); gPlayerBullet.addChild(b); };
     scene.addItem = function (it) { this.items.push(it); gItem.addChild(it); };
@@ -201,7 +206,7 @@ function makeStageScene(stageIdx) {
     function updateList(list, group) {
         for (var i = list.length - 1; i >= 0; i--) {
             if (!list[i].update(scene)) {
-                group.removeChild(list[i]);
+                (list[i].parentNode || group).removeChild(list[i]);
                 list.splice(i, 1);
             }
         }
@@ -291,6 +296,8 @@ function makeStageScene(stageIdx) {
     var stateTimer = 150;
     var spawners = [];             // 実行中の編隊
     var pendingWaves = stage.waves.slice();
+    var midBossDone = false;       // このステージの中ボスを消化したか
+    var midBossMsg = 0;            // ボーナス表示の残りフレーム
     var deathTimer = -1;           // 自機死亡からの復帰カウンタ
     var gameOverTimer = -1;
 
@@ -315,6 +322,45 @@ function makeStageScene(stageIdx) {
                 s.timer = w2.interval;
                 if (s.spawned >= w2.n) { spawners.splice(i, 1); }
             }
+        }
+    }
+
+    function clearCenterMsg() {
+        centerMsg.visible = false;
+        subMsg.visible = false;
+    }
+
+    /* ---------- 中ボス ---------- */
+    function startMidBoss() {
+        state = 'midboss';
+        clearCenterMsg();                    // ステージ名などが出ていたら消す
+        AudioMgr.playBgm('midboss');        // 不穏なBGMへ
+        scene.midBoss = new MidBoss();
+        gEnemy.addChild(scene.midBoss);
+    }
+
+    function endMidBoss() {
+        gEnemy.removeChild(scene.midBoss);
+        scene.midBoss = null;
+        midBossDone = true;
+        state = 'play';
+        AudioMgr.playBgm(stage.bgm);         // ステージBGMへ戻す
+    }
+
+    /* 中ボスを倒したときの加点と演出 */
+    function onMidBossHit(result) {
+        var cfg = CONFIG.MIDBOSS;
+        if (result === 'bonus') {
+            GameState.addScore(cfg.bonusScore);
+            centerMsg.text = 'PERFECT!';
+            centerMsg.color = '#ffd700';
+            subMsg.text = 'BONUS ' + cfg.bonusScore;
+            subMsg.color = '#ffffff';
+            centerMsg.visible = true;
+            subMsg.visible = true;
+            midBossMsg = 150;
+        } else if (result === 'normal') {
+            GameState.addScore(cfg.normalScore);
         }
     }
 
@@ -407,7 +453,7 @@ function makeStageScene(stageIdx) {
                         AudioMgr.playSe('explosion');
                         GameState.addScore(e.score);
                         if (e.drop) { scene.addItem(new PowerUp(e.cx(), e.cy())); }
-                        gEnemy.removeChild(e);
+                        e.parentNode.removeChild(e);
                         scene.enemies.splice(j, 1);
                     } else {
                         AudioMgr.playSe('hit');
@@ -421,6 +467,18 @@ function makeStageScene(stageIdx) {
                 gPlayerBullet.removeChild(b);
                 scene.playerBullets.splice(i, 1);
                 scene.boss.damage(1);
+                continue;
+            }
+            /* 自機弾 vs 中ボス(コアと4パーツのどこに当たっても1ダメージ) */
+            if (scene.midBoss && scene.midBoss.vulnerable()) {
+                var tg = scene.midBoss.targets(), m;
+                for (m = 0; m < tg.length; m++) {
+                    if (!hitCircle(b.cx(), b.cy(), b.r, tg[m].x, tg[m].y, tg[m].r)) { continue; }
+                    gPlayerBullet.removeChild(b);
+                    scene.playerBullets.splice(i, 1);
+                    onMidBossHit(scene.midBoss.damage(1));
+                    break;
+                }
             }
         }
 
@@ -443,7 +501,7 @@ function makeStageScene(stageIdx) {
                 e = scene.enemies[i];
                 if (hitCircle(e.cx(), e.cy(), e.r * 0.8, px, py, pr + 2)) {
                     scene.addEffect(new Explosion(e.cx(), e.cy()));
-                    gEnemy.removeChild(e);
+                    e.parentNode.removeChild(e);
                     scene.enemies.splice(i, 1);
                     killPlayer();
                     return;
@@ -454,6 +512,16 @@ function makeStageScene(stageIdx) {
                 hitCircle(scene.boss.cx(), scene.boss.cy(), scene.boss.r * 0.8, px, py, pr + 2)) {
                 killPlayer();
                 return;
+            }
+            /* 中ボス本体 vs 自機。無敵演出中は当たらない(理不尽を避ける) */
+            if (scene.midBoss && scene.midBoss.vulnerable()) {
+                var mt = scene.midBoss.targets(), mi;
+                for (mi = 0; mi < mt.length; mi++) {
+                    if (hitCircle(mt[mi].x, mt[mi].y, mt[mi].r * 0.8, px, py, pr + 2)) {
+                        killPlayer();
+                        return;
+                    }
+                }
             }
         }
 
@@ -490,7 +558,14 @@ function makeStageScene(stageIdx) {
         } else if (state === 'play') {
             t++;
             runSpawners();
-            if (t >= stage.bossAt && scene.enemies.length === 0) { startWarning(); }
+            if (!midBossDone && stage.midBossAt && t >= stage.midBossAt) {
+                startMidBoss();
+            } else if (t >= stage.bossAt && scene.enemies.length === 0) {
+                startWarning();
+            }
+        } else if (state === 'midboss') {
+            /* 中ボス中は新しい編隊を出さない(t も進めない)。
+               既に出ている敵と地上物はそのまま流れていく */
         } else if (state === 'warning') {
             centerMsg.visible = (stateTimer % 20 < 12);
             subMsg.visible = centerMsg.visible;
@@ -506,6 +581,9 @@ function makeStageScene(stageIdx) {
                 return;
             }
         }
+
+        /* ボーナス表示は状態に関わらず消す(撃破で play に戻っても残らないように) */
+        if (midBossMsg > 0 && --midBossMsg === 0) { clearCenterMsg(); }
 
         /* 死亡・復活・ゲームオーバー */
         if (deathTimer > 0 && --deathTimer === 0) { respawn(); }
@@ -526,6 +604,9 @@ function makeStageScene(stageIdx) {
         if (scene.boss) {
             if (!scene.boss.update(scene)) { /* onBossDead 内で後処理済み */ }
         }
+        if (scene.midBoss) {
+            if (!scene.midBoss.update(scene)) { endMidBoss(); }
+        }
 
         collide();
         if (scene.boss) { drawHpBar(); }
@@ -534,13 +615,18 @@ function makeStageScene(stageIdx) {
 
     /* デバッグ用フック(main.js の ?debug=1 から使う) */
     scene.debug = {
+        /* 中ボス演出を即開始する */
+        startMidBoss: function () {
+            if (scene.midBoss || midBossDone) { return; }
+            startMidBoss();
+        },
         skipToBoss: function () {
             if (state !== 'play' && state !== 'intro') { return; }
             state = 'play';
             t = stage.bossAt;
             pendingWaves = [];
             spawners = [];
-            scene.enemies.forEach(function (e) { gEnemy.removeChild(e); });
+            scene.enemies.forEach(function (e) { e.parentNode.removeChild(e); });
             scene.enemies = [];
             centerMsg.visible = false;
             subMsg.visible = false;

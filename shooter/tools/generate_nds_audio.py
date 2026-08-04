@@ -87,9 +87,9 @@ PERIOD_SET = set(PERIODS)
 DRUM_NOTE = 24                      # C-3, period 214
 DRUM_RATE = PAL_CLOCK / 214.0       # ~16574.3 Hz -- drum PCM native rate
 
-TRACKS = ["title", "stage1", "stage2", "stage3", "boss", "ending"]
+TRACKS = ["title", "stage1", "stage2", "stage3", "boss", "ending", "midboss"]
 SES = ["shot", "hit", "explosion", "player_death", "powerup",
-       "boss_explosion", "start", "clear"]
+       "boss_explosion", "start", "clear", "fanfare"]
 
 GAIN_START = 1.35
 GAIN_MIN, GAIN_MAX = 0.30, 1.90

@@ -53,6 +53,12 @@ docker run --rm -v "$PWD:/w" -w /w devkitpro/devkitarm:latest make CFLAGS_EXTRA=
 
 # ボタン入力を台本化(左→右→上→下を繰り返す)。移動と画面端クランプの確認用
 docker run --rm -v "$PWD:/w" -w /w devkitpro/devkitarm:latest make CFLAGS_EXTRA=-DTEST_INPUT
+
+# 中ボスが合体するまで自動連射を止める(合体後の形態を確認する用)
+docker run --rm -v "$PWD:/w" -w /w devkitpro/devkitarm:latest make CFLAGS_EXTRA="-DTEST_FAST -DTEST_MB_LETMERGE"
+
+# 中ボスを出さずステージを流す(地上物の確認用)
+docker run --rm -v "$PWD:/w" -w /w devkitpro/devkitarm:latest make CFLAGS_EXTRA=-DTEST_GROUND
 ```
 
 `TEST_FAST` ならタイトル→3ステージ→各ボス→エンディングを数分で通せる。
@@ -147,6 +153,17 @@ Web版用のアセット(`../shooter/assets/`)は上記スクリプトでは変�
   切り替えて色を変えている。背景(8bpp)がBGパレット0..127しか使わない前提で、
   バンク8..15を文字色に割り当てている。
 - **エンティティの経過時間**は各自のカウンタで持っている(ポーズで正しく止まる)。
+
+## 追加要素(地上物 / 中ボス)
+
+ブラウザ版と同じ仕様。詳細は [../shooter/README.md](../shooter/README.md) を参照。
+
+- **地上物**: 背景と同速度で流れる固定設置物。通常ショットで破壊可。
+  DSではスプライト優先度3で描き、他のスプライトより奥に置いている
+- **中ボス**: コアの四方に4パーツが出現 → 1秒静止(無敵) → 1秒で合体。
+  合体までに8発当てると50000点、合体後に8発当てると1000点。
+  パーツの合体位置は `MB_ATTACH_R`(12px)で、これはスプライト同士の
+  噛み合わせなのでブラウザ版の x0.5(他の距離は x0.8)
 
 ## 難易度・ステージ構成の調整
 

@@ -767,6 +767,197 @@ def powerup_frames():
 
 
 # ----------------------------------------------------------------------------
+# 13/14. GROUND INSTALLATIONS — 16x16, 2 frames. These scroll WITH the
+# background, so they are deliberately darker / more muted than the flying
+# enemies, flat and squat, with a solid dark rim + inset shadow line at the
+# bottom so they read as structures bolted to the ground.
+# ----------------------------------------------------------------------------
+
+GROUND_BASE = {
+    "k": (16, 18, 16, 255),     # outline / ground rim
+    "D": (52, 56, 52, 255),     # dark steel
+    "S": (96, 100, 96, 255),    # mid steel
+    "H": (140, 146, 140, 255),  # light steel (sparse)
+}
+
+# gturret — bunker-mounted cannon, barrel pointing up at the player.
+# '1' = muzzle row (dark bore idle -> flash core firing),
+# '2'/'3' = muzzle flash (frame 2 only). Firing also reads as a 1px recoil
+# because the solid barrel tip is replaced by the flash.
+GTURRET_HALF = [
+    ".......3",
+    ".....233",
+    "......k1",
+    "......kS",
+    "......kS",
+    "......kS",
+    ".....kkS",
+    ".....kDS",
+    "..kkkDDS",
+    ".kDSSSSS",
+    ".kDSHHSS",
+    "kDSSSSSS",
+    "kDSkSSkS",
+    "kDDDDDDD",
+    "kkkkkkkk",
+    ".kkkkkkk",
+]
+
+def gturret_frames():
+    grid = mirror(GTURRET_HALF)
+    f1 = leg(GROUND_BASE, **{"1": (52, 56, 52, 255),    # dark open bore
+                             "2": None, "3": None})
+    f2 = leg(GROUND_BASE, **{"1": (255, 220, 60, 255),  # bore -> flash core
+                             "2": (255, 220, 60, 255),
+                             "3": (255, 255, 235, 255)})
+    return [render(grid, f1, "gturret f1"), render(grid, f2, "gturret f2")]
+
+
+# gradar — radar/sensor installation, same grey-steel family as gturret but
+# no gun: a tilted scanner dish with a green emitter on a short mast.
+# Frame 2 mirrors the dish to the other side (obvious sweep) and brightens
+# the green status lamps on the base.
+GRADAR_BASE_GRID = [
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "......kSSk......",
+    "......kSSk......",
+    "......kSSk......",
+    "....kkkSSkkk....",
+    "...kDSSSSSSDk...",
+    "..kDSSSSSSSSDk..",
+    "..kDSHHSSHHSDk..",
+    "..kDaSSSSSSaDk..",
+    "..kDDDDDDDDDDk..",
+    "..kkkkkkkkkkkk..",
+    "...kkkkkkkkkk...",
+]
+
+GRADAR_DISH = [  # rows 0-4, stamped over the base (mirrored for frame 2)
+    ".ggk............",
+    ".gHHHk..........",
+    ".kHHHHHk........",
+    "..kkHHHHkk......",
+    "....kkkHHkk.....",
+]
+
+def gradar_grid(flip):
+    """base + scanner dish; flip=True mirrors the dish (sweep frame)."""
+    g = [list(row) for row in GRADAR_BASE_GRID]
+    for y, row in enumerate(GRADAR_DISH):
+        if flip:
+            row = row[::-1]
+        for x, ch in enumerate(row):
+            if ch != ".":
+                g[y][x] = ch
+    return ["".join(row) for row in g]
+
+
+def gradar_frames():
+    f1 = leg(GROUND_BASE, g=(150, 235, 130, 255), a=(70, 190, 70, 255))
+    f2 = leg(GROUND_BASE, g=(150, 235, 130, 255), a=(150, 235, 130, 255))
+    return [render(gradar_grid(False), f1, "gradar f1"),
+            render(gradar_grid(True), f2, "gradar f2")]
+
+
+# ----------------------------------------------------------------------------
+# 15/16. MID-BOSS — amber/dark-bronze family (distinct from boss1 steel-blue,
+# boss2 crimson, boss3 purple). midcore (32x32) descends first: an armoured
+# reactor with a glowing eye and FOUR bare socket stubs on the axes. Four
+# midpart modules (16x16, 4-fold symmetric so they work unrotated at all four
+# positions) then fly in and lock on at +-12 art px (+-24 web px) from the
+# core centre along each axis: the part's 12x12 body swallows the socket stub
+# and seats onto the armour ring, its inner connector face meeting the plate.
+# ----------------------------------------------------------------------------
+
+MIDBOSS_BASE = {
+    "k": (20, 14, 6, 255),      # near-black bronze outline
+    "D": (76, 50, 16, 255),     # dark bronze
+    "B": (140, 96, 32, 255),    # bronze armor
+    "H": (200, 150, 60, 255),   # polished bronze highlight
+}
+
+def midcore_grid():
+    n = 32
+    c = (n - 1) / 2.0
+
+    def angdist(a, step, offset=0.0):
+        d = (a - offset) % step
+        return min(d, step - d)
+
+    rows = []
+    for y in range(n):
+        line = ""
+        for x in range(n):
+            dx, dy = x - c, y - c
+            r = math.hypot(dx, dy)
+            a = math.atan2(dy, dx)
+            ch = "."
+            if r <= 2.0:
+                ch = "w"                                  # reactor hot centre
+            elif r <= 4.2:
+                ch = "e"                                  # reactor glow
+            elif r <= 5.6:
+                ch = "k"                                  # eye rim
+            elif r <= 10.2:
+                ch = "B"                                  # armour plate
+                if angdist(a, math.pi / 2, math.pi / 4) * r <= 1.0:
+                    ch = "D"                              # diagonal seams
+                elif r > 8.4 and dy < 0:
+                    ch = "H"                              # top-lit plate edge
+            elif r <= 11.4:
+                ch = "D"                                  # recessed groove
+            elif r <= 12.4:
+                ch = "k"                                  # outer ring
+            # four bare socket stubs on the axes (parts dock here)
+            ax, pp = ((abs(dx), abs(dy)) if abs(dx) >= abs(dy)
+                      else (abs(dy), abs(dx)))
+            if pp <= 2.5 and ax >= 11.2:
+                if ax >= 14.5:
+                    ch = "s" if pp <= 1.5 else "k"        # socket mouth
+                elif pp >= 2.4:
+                    ch = "k"                              # stub side walls
+                else:
+                    ch = "D"                              # stub channel
+            line += ch
+        rows.append(line)
+    return rows
+
+
+def midcore_frames():
+    grid = midcore_grid()
+    f1 = leg(MIDBOSS_BASE, w=(255, 220, 60, 255), e=(255, 160, 50, 255),
+             s=(76, 50, 16, 255))                    # sockets dark, idle glow
+    f2 = leg(MIDBOSS_BASE, w=(255, 255, 235, 255), e=(255, 220, 60, 255),
+             s=(255, 196, 70, 255))                  # glow surge, sockets lit
+    return [render(grid, f1, "midcore f1"), render(grid, f2, "midcore f2")]
+
+
+# midpart — 12x12 armour module in a 16x16 frame, 4-fold symmetric (drawn
+# unrotated above/below/left/right of the core). Connector mouths 's' on all
+# four faces match the core's socket mouths; 'c' is the charge lamp.
+MIDPART_TOP = [
+    "................",
+    "................",
+    "...kkksssskkk...",
+    "..kkDDssssDDkk..",
+    "..kDBBBBBBBBDk..",
+    "..kDBBHBBHBBDk..",
+    "..ssBBBBBBBBss..",
+    "..ssBBBccBBBss..",
+]
+
+def midpart_frames():
+    grid = MIDPART_TOP + MIDPART_TOP[::-1]
+    f1 = leg(MIDBOSS_BASE, s=(76, 50, 16, 255), c=(255, 160, 50, 255))
+    f2 = leg(MIDBOSS_BASE, s=(255, 196, 70, 255), c=(255, 220, 60, 255))
+    return [render(grid, f1, "midpart f1"), render(grid, f2, "midpart f2")]
+
+
+# ----------------------------------------------------------------------------
 # backgrounds — 320x480, opaque, vertically seamless (all features wrap mod H)
 # ----------------------------------------------------------------------------
 
@@ -941,6 +1132,10 @@ CONTRACT = {
     "bullet_enemy.png": (12, 12),
     "explosion.png": (128, 32),
     "powerup.png": (32, 16),
+    "gturret.png": (64, 32),
+    "gradar.png": (64, 32),
+    "midcore.png": (128, 64),
+    "midpart.png": (64, 32),
     "bg1.png": (320, 480),
     "bg2.png": (320, 480),
     "bg3.png": (320, 480),
@@ -959,6 +1154,10 @@ SPRITES = [
     ("bullet_enemy.png", bullet_enemy_frames),
     ("explosion.png", explosion_frames),
     ("powerup.png", powerup_frames),
+    ("gturret.png", gturret_frames),
+    ("gradar.png", gradar_frames),
+    ("midcore.png", midcore_frames),
+    ("midpart.png", midpart_frames),
 ]
 
 BACKGROUNDS = [

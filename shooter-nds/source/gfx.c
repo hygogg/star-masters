@@ -39,6 +39,10 @@ static const SprDef spr_defs[SPR_COUNT] = {
     DEF(SPR_ENEMY2,    enemy2,        ENEMY2),
     DEF(SPR_ENEMY3,    enemy3,        ENEMY3),
     DEF(SPR_MIDENEMY,  midenemy,      MIDENEMY),
+    DEF(SPR_GTURRET,   gturret,       GTURRET),
+    DEF(SPR_GRADAR,    gradar,        GRADAR),
+    DEF(SPR_MIDCORE,   midcore,       MIDCORE),
+    DEF(SPR_MIDPART,   midpart,       MIDPART),
     DEF(SPR_BOSS1,     boss1,         BOSS1),
     DEF(SPR_BOSS2,     boss2,         BOSS2),
     DEF(SPR_BOSS3,     boss3,         BOSS3),
@@ -204,6 +208,11 @@ void spr_begin(void)
 
 void spr_draw(int id, int frame, int x, int y)
 {
+    spr_draw_prio(id, frame, x, y, 2);
+}
+
+void spr_draw_prio(int id, int frame, int x, int y, int prio)
+{
     const SprDef *d = &spr_defs[id];
 
     if (frame >= d->frames) frame = d->frames - 1;
@@ -214,7 +223,7 @@ void spr_draw(int id, int frame, int x, int y)
 
     /* 上画面: プレイフィールド y 0..191 */
     if (y + d->h > 0 && y < SCR_H && oamCountTop < OAM_LIMIT) {
-        oamSet(&oamMain, oamCountTop++, x, y, 2, 0,
+        oamSet(&oamMain, oamCountTop++, x, y, prio, 0,
                d->size, SpriteColorFormat_256Color, gfxTop[id][frame],
                -1, false, false, false, false, false);
     }
@@ -222,7 +231,7 @@ void spr_draw(int id, int frame, int x, int y)
     {
         int sy = y - SCR_H;
         if (sy + d->h > 0 && sy < SCR_H && oamCountBot < OAM_LIMIT) {
-            oamSet(&oamSub, oamCountBot++, x, sy, 2, 0,
+            oamSet(&oamSub, oamCountBot++, x, sy, prio, 0,
                    d->size, SpriteColorFormat_256Color, gfxBot[id][frame],
                    -1, false, false, false, false, false);
         }

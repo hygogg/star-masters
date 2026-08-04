@@ -971,6 +971,12 @@ def main():
         ("bullet_enemy",  GI.bullet_enemy_frames,   8,  8),
         ("explosion",     GI.explosion_frames,     16, 16),
         ("powerup",       GI.powerup_frames,        8,  8),
+        # ground installations + two-piece mid-boss (appended LAST so the
+        # shared palette indices of all pre-existing sprites are unchanged)
+        ("gturret",       GI.gturret_frames,       16, 16),
+        ("gradar",        GI.gradar_frames,        16, 16),
+        ("midcore",       GI.midcore_frames,       32, 32),
+        ("midpart",       GI.midpart_frames,       16, 16),
     ]
     gathered = []
     for name, fn, W, H in specs:

@@ -33,6 +33,7 @@ typedef struct {
     s32         scroll;      /* 24.8 px/frame */
     const Wave *waves;
     u8          waveCount;
+    int         midBossAt;   /* このフレームで中ボス演出へ */
     int         bossAt;
     u8          bossId;      /* 1..3 (弾幕パターンの分岐に使う) */
     u8          bossSpr;

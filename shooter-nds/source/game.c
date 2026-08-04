@@ -28,16 +28,35 @@
  *     ボタン入力を台本化して差し替える(左→右→上→下を繰り返す)。
  *     自機の移動・画面端でのクランプ・ショットが正しいかを画面で確認するため。
  */
-#if defined(TEST_FAST) || defined(TEST_INPUT)
-  #define BOSS_AT(s)   240
+#if defined(TEST_GROUND)
+  /* 地上物の確認用: 中ボスを出さず、ステージを通常どおり流す */
+  #define MIDBOSS_AT(s) 0
+  #define BOSS_AT(s)   3000
+  #define BOSS_HP(s)   40
+  #define T_AUTOSTART  1
+  #define T_INVINC     1
+#elif defined(TEST_FAST) || defined(TEST_INPUT)
+  #define MIDBOSS_AT(s) 120           /* 中ボスも早く出す */
+  #define BOSS_AT(s)   480
   #define BOSS_HP(s)   40
   #define T_AUTOSTART  1
   #define T_INVINC     1
 #else
+  #define MIDBOSS_AT(s) ((s)->midBossAt)
   #define BOSS_AT(s)   ((s)->bossAt)
   #define BOSS_HP(s)   ((s)->bossHp)
   #define T_AUTOSTART  0
   #define T_INVINC     0
+#endif
+
+/*
+ * TEST_MB_LETMERGE: 中ボスが合体するまで自動連射を止める。
+ * 合体後の通常形態(1000点側)を画面で確認するためのテスト専用。
+ */
+#ifdef TEST_MB_LETMERGE
+  #define T_HOLD_FIRE (midBoss.active && midBoss.state != MB_FULL)
+#else
+  #define T_HOLD_FIRE 0
 #endif
 
 #ifdef TEST_FAST
@@ -97,6 +116,7 @@ static Bullet pbullets[MAX_PBULLETS];
 static Item   items[MAX_ITEMS];
 static Effect effects[MAX_EFFECTS];
 static Boss   boss;
+static MidBoss midBoss;
 
 static int  enemyCount;      /* 生存数(WARNING判定用) */
 static int  ebulletCount;
@@ -110,6 +130,8 @@ static int  deathTimer;
 static int  gameOverTimer;
 static s32  scrollAccum;        /* 背景スクロール累積 (24.8) */
 static bool paused;
+static bool midBossDone;      /* このステージの中ボスを消化したか */
+static int  midBossMsg;       /* ボーナス表示の残りフレーム */
 static int  frameCounter;    /* 演出の点滅用 */
 
 /* 実行中の編隊 */
@@ -158,6 +180,8 @@ static inline int keysShot(void)  { return held_keys() & (KEY_A | KEY_B | KEY_X 
 
 static inline int cx_of(s32 x, int id) { return FX2I(x) + spr_w(id) / 2; }
 static inline int cy_of(s32 y, int id) { return FX2I(y) + spr_h(id) / 2; }
+
+static void clear_center_msg(void);   /* 定義は描画セクション */
 
 static bool hit_circle(int ax, int ay, int ar, int bx, int by, int br)
 {
@@ -348,7 +372,8 @@ static void player_update(void)
     if (player.y > maxY) player.y = maxY;
 
     if (player.cooldown > 0) player.cooldown--;
-    if ((keysShot() || player.touching || T_AUTOFIRE) && player.cooldown <= 0) {
+    if ((keysShot() || player.touching || (T_AUTOFIRE && !T_HOLD_FIRE)) &&
+        player.cooldown <= 0) {
         player_shoot();
         player.cooldown = PLAYER_SHOT_INTV;
     }
@@ -454,6 +479,14 @@ static void enemy_update(Enemy *e)
             if (e->vy < FP(0.48)) e->vy = FP(0.48);
         }
         e->x += e->vx; e->y += e->vy;
+        break;
+    /*
+     * 地上物。背景と同じ速度で流れるので「地面に固定されている」ように見える。
+     * 空中物との違いは移動だけで、当たり判定・破壊のされ方は同じ
+     * (通常ショットで壊せる)。
+     */
+    case PAT_GROUND:
+        e->y += stg->scroll;
         break;
     case PAT_HOVER:
         if (FX2I(e->y) < 72) {
@@ -609,6 +642,19 @@ static void boss_attack(void)
     }
 }
 
+/* 中ボスを倒したときの加点と演出 */
+static void on_midboss_hit(int result)
+{
+    if (result == MBR_BONUS) {
+        gs.score += MB_BONUS_SCORE;
+        if (gs.score > gs.hiScore) gs.hiScore = gs.score;
+        midBossMsg = 150;
+    } else if (result == MBR_NORMAL) {
+        gs.score += MB_NORMAL_SCORE;
+        if (gs.score > gs.hiScore) gs.hiScore = gs.score;
+    }
+}
+
 static void clear_ebullets(void)
 {
     int i;
@@ -662,6 +708,147 @@ static void boss_damage(int n)
         boss.dyingAge = 0;
         snd_se(SE_BOSS_EXPLOSION);
     }
+}
+
+/* ============================================================ */
+/* 中ボス                                                        */
+/* ============================================================ */
+
+/*
+ * コア1つ + 四方(上下左右)のパーツ4つ。Web版と同じ流れ:
+ *   ENTER … コアが上部へ降下                (無敵)
+ *   HOLD  … 四方にパーツが出現して静止       (無敵) MB_HOLD_FRAMES
+ *   MERGE … パーツがコアへ集まる             (有効) MB_MERGE_FRAMES
+ *           ここで MB_HP 発当てて壊すと MB_BONUS_SCORE + ファンファーレ
+ *   FULL  … 合体完了。HPを戻して通常戦闘      (有効) 壊すと MB_NORMAL_SCORE
+ * 当たり判定はコアと4パーツそれぞれに持たせ、ダメージは1つのHPに集約する。
+ */
+static const s8 MB_DIRS[4][2] = { { 0, -1 }, { 0, 1 }, { -1, 0 }, { 1, 0 } };
+
+static void midboss_start(void)
+{
+    memset(&midBoss, 0, sizeof(midBoss));
+    midBoss.active = true;
+    midBoss.state = MB_ENTER;
+    midBoss.result = MBR_NONE;
+    midBoss.hp = MB_HP;
+    midBoss.cx = I2FX(FIELD_W / 2);
+    midBoss.cy = -I2FX(spr_h(SPR_MIDCORE) / 2);
+    midBoss.partR = I2FX(MB_RING_R);
+}
+
+static bool midboss_vulnerable(void)
+{
+    return midBoss.active &&
+           (midBoss.state == MB_MERGE || midBoss.state == MB_FULL);
+}
+
+/* i=0..3 がパーツ、i=4 がコア。中心座標と半径を返す */
+static void midboss_target(int i, int *tx, int *ty, int *tr)
+{
+    if (i >= 4) {
+        *tx = FX2I(midBoss.cx);
+        *ty = FX2I(midBoss.cy);
+        *tr = spr_w(SPR_MIDCORE) * 36 / 100;
+    } else {
+        int r = FX2I(midBoss.partR);
+        *tx = FX2I(midBoss.cx) + MB_DIRS[i][0] * r;
+        *ty = FX2I(midBoss.cy) + MB_DIRS[i][1] * r;
+        *tr = spr_w(SPR_MIDPART) * 36 / 100;
+    }
+}
+
+static int midboss_target_count(void)
+{
+    return midBoss.partsVisible ? 5 : 1;
+}
+
+/* 戻り値: 撃破したら MBR_BONUS / MBR_NORMAL、まだなら MBR_NONE */
+static int midboss_damage(int n)
+{
+    if (!midboss_vulnerable()) return MBR_NONE;
+    midBoss.hp -= n;
+    midBoss.flash = 3;
+    if (midBoss.hp > 0) {
+        snd_se(SE_HIT);
+        return MBR_NONE;
+    }
+    midBoss.hp = 0;
+    midBoss.result = (midBoss.state == MB_MERGE) ? MBR_BONUS : MBR_NORMAL;
+    midBoss.state = MB_DYING;
+    midBoss.t = 0;
+    snd_se(midBoss.result == MBR_BONUS ? SE_FANFARE : SE_BOSS_EXPLOSION);
+    return midBoss.result;
+}
+
+/* 戻り値: false で消滅(呼び出し側が後処理する) */
+static bool midboss_update(void)
+{
+    int t = ++midBoss.t;
+
+    switch (midBoss.state) {
+    case MB_ENTER:
+        midBoss.cy += MB_ENTER_SPEED;
+        if (FX2I(midBoss.cy) >= MB_CORE_CY) {
+            midBoss.cy = I2FX(MB_CORE_CY);
+            midBoss.state = MB_HOLD;
+            midBoss.t = 0;
+            midBoss.partsVisible = true;      /* 四方にパーツが出現 */
+            midBoss.partR = I2FX(MB_RING_R);
+        }
+        break;
+
+    case MB_HOLD:
+        if (t >= MB_HOLD_FRAMES) { midBoss.state = MB_MERGE; midBoss.t = 0; }
+        break;
+
+    case MB_MERGE: {
+        /* ringR から attachR へ線形に寄せる */
+        s32 k = (t > MB_MERGE_FRAMES) ? MB_MERGE_FRAMES : t;
+        midBoss.partR = I2FX(MB_RING_R) +
+                        (I2FX(MB_ATTACH_R) - I2FX(MB_RING_R)) * k / MB_MERGE_FRAMES;
+        if (t >= MB_MERGE_FRAMES) {
+            midBoss.state = MB_FULL;          /* 合体成立。HPを戻す */
+            midBoss.t = 0;
+            midBoss.hp = MB_HP;
+            midBoss.partR = I2FX(MB_ATTACH_R);
+            midBoss.shootTimer = 30;
+        }
+        break;
+    }
+
+    case MB_FULL:
+        midBoss.cx = I2FX(FIELD_W / 2) + SINFX(FP(72.0), t * 130);
+        midBoss.cy = I2FX(MB_CORE_CY) + SINFX(FP(11.2), t * 89);
+        if (--midBoss.shootTimer <= 0) {
+            midBoss.shootTimer = MB_SHOOT_EVERY;
+            fire_aimed(FX2I(midBoss.cx), FX2I(midBoss.cy) + 16, 3, SPREAD_026, FP(2.4));
+        }
+        if (t >= MB_FULL_TIMEOUT) {           /* 倒せないままなら去る */
+            midBoss.result = MBR_ESCAPED;
+            midBoss.state = MB_DYING;
+            midBoss.t = 0;
+        }
+        break;
+
+    case MB_DYING:
+        if (midBoss.result == MBR_ESCAPED) {
+            midBoss.cy -= FP(2.4);
+            if (FX2I(midBoss.cy) < -spr_h(SPR_MIDCORE)) return false;
+        } else {
+            if ((t % 7) == 0) {
+                add_effect(FX2I(midBoss.cx) + game_rand(64) - 32,
+                           FX2I(midBoss.cy) + game_rand(64) - 32);
+                /* ボーナス時はファンファーレを爆発音で潰さない */
+                if (midBoss.result != MBR_BONUS) snd_se(SE_EXPLOSION);
+            }
+            if (t >= 80) return false;
+        }
+        break;
+    }
+
+    if (midBoss.flash > 0) midBoss.flash--;
+    return true;
 }
 
 /* ============================================================ */
@@ -750,6 +937,20 @@ static void collide(void)
                        cy_of(boss.y, boss.spr), boss.r)) {
             b->active = false;
             boss_damage(1);
+            continue;
+        }
+
+        /* 自機弾 vs 中ボス(コアと4パーツのどこに当たっても1ダメージ) */
+        if (midboss_vulnerable()) {
+            int n = midboss_target_count(), k, tx, ty, tr;
+            for (k = 0; k < n; k++) {
+                int idx = (k == n - 1) ? 4 : k;      /* 最後がコア */
+                midboss_target(idx, &tx, &ty, &tr);
+                if (!hit_circle(bx, by, b->r, tx, ty, tr)) continue;
+                b->active = false;
+                on_midboss_hit(midboss_damage(1));
+                break;
+            }
         }
     }
 
@@ -788,6 +989,18 @@ static void collide(void)
                        boss.r * 4 / 5, px, py, PLAYER_HIT_R + 1)) {
             kill_player();
             return;
+        }
+        /* 中ボス本体 vs 自機。無敵演出中は当たらない(理不尽を避ける) */
+        if (midboss_vulnerable()) {
+            int n = midboss_target_count(), k, tx, ty, tr;
+            for (k = 0; k < n; k++) {
+                int idx = (k == n - 1) ? 4 : k;
+                midboss_target(idx, &tx, &ty, &tr);
+                if (hit_circle(tx, ty, tr * 4 / 5, px, py, PLAYER_HIT_R + 1)) {
+                    kill_player();
+                    return;
+                }
+            }
         }
     }
 
@@ -857,6 +1070,7 @@ static void reset_entities(void)
     memset(effects, 0, sizeof(effects));
     memset(spawners, 0, sizeof(spawners));
     memset(&boss, 0, sizeof(boss));
+    memset(&midBoss, 0, sizeof(midBoss));
     enemyCount = 0;
     ebulletCount = 0;
     nextWave = 0;
@@ -871,6 +1085,8 @@ static void start_stage(int idx)
     reset_entities();
     player_reset();
     stageT = 0;
+    midBossDone = false;
+    midBossMsg = 0;
     deathTimer = 0;
     gameOverTimer = 0;
     scrollAccum = 0;
@@ -886,6 +1102,23 @@ static void start_stage(int idx)
 
     state = ST_INTRO;
     stateTimer = 150;
+}
+
+/* ---------- 中ボスの開始/終了 ---------- */
+static void start_midboss_seq(void)
+{
+    state = ST_MIDBOSS;
+    clear_center_msg();          /* ステージ名などが出ていたら消す */
+    snd_bgm(BGM_MIDBOSS);        /* 不穏なBGMへ */
+    midboss_start();
+}
+
+static void end_midboss_seq(void)
+{
+    midBoss.active = false;
+    midBossDone = true;
+    state = ST_PLAY;
+    snd_bgm(stg->bgm);           /* ステージBGMへ戻す */
 }
 
 static void start_warning(void)
@@ -1036,6 +1269,13 @@ static void draw_center_msg(void)
             txt_center(SCREEN_TOP, 13, "                ", TXT_RED);
         }
         break;
+    case ST_MIDBOSS:
+        if (midBossMsg > 0) {
+            txt_center(SCREEN_TOP, 11, "PERFECT!", TXT_GOLD);
+            txt_center(SCREEN_TOP, 13, "BONUS", TXT_WHITE);
+            txt_num(SCREEN_TOP, 19, 13, MB_BONUS_SCORE, 5, TXT_WHITE);
+        }
+        break;
     case ST_CLEAR:
         txt_center(SCREEN_TOP, 11, "STAGE CLEAR!", TXT_GOLD);
         txt_center(SCREEN_TOP, 13, "BONUS", TXT_WHITE);
@@ -1070,11 +1310,45 @@ static void draw_entities(void)
             spr_draw(boss.spr, (frameCounter / 10) & 1, FX2I(boss.x), FX2I(boss.y));
     }
 
+    /*
+     * 中ボス。パーツを先に描き、コアを後に描く(=コアが手前)。
+     * こうするとコアの装甲リングとソケットの爪がパーツの上に残り、
+     * 「掴んで固定している」ように見える。
+     * 静止中(無敵)は点滅させて、まだ攻撃が効かないことを示す。
+     */
+    if (midBoss.active) {
+        bool show = true;
+        int fr = (frameCounter / 8) & 1;
+        if (midBoss.state == MB_DYING && midBoss.result != MBR_ESCAPED) {
+            show = (midBoss.t & 2) != 0;
+        } else if (midBoss.flash > 0) {
+            show = (frameCounter & 1) != 0;
+        } else if (midBoss.state == MB_HOLD) {
+            show = (midBoss.t % 10) >= 5;
+        }
+        if (show) {
+            int k, tx, ty, tr;
+            if (midBoss.partsVisible) {
+                for (k = 0; k < 4; k++) {
+                    midboss_target(k, &tx, &ty, &tr);
+                    spr_draw(SPR_MIDPART, fr,
+                             tx - spr_w(SPR_MIDPART) / 2,
+                             ty - spr_h(SPR_MIDPART) / 2);
+                }
+            }
+            midboss_target(4, &tx, &ty, &tr);
+            spr_draw(SPR_MIDCORE, fr,
+                     tx - spr_w(SPR_MIDCORE) / 2, ty - spr_h(SPR_MIDCORE) / 2);
+        }
+    }
+
     for (i = 0; i < MAX_ENEMIES; i++) {
         Enemy *e = &enemies[i];
         if (!e->active) continue;
         if (e->flash > 0 && !(frameCounter & 1)) continue;
-        spr_draw(e->spr, (e->t >> 3) & 1, FX2I(e->x), FX2I(e->y));
+        /* 地上物は優先度3で他のスプライトより奥に描く */
+        spr_draw_prio(e->spr, (e->t >> 3) & 1, FX2I(e->x), FX2I(e->y),
+                      (e->pattern == PAT_GROUND) ? 3 : 2);
     }
 
     for (i = 0; i < MAX_EBULLETS; i++)
@@ -1230,7 +1504,15 @@ static void frame_stage(void)
     case ST_PLAY:
         stageT++;
         run_spawners();
-        if (stageT >= BOSS_AT(stg) && enemyCount == 0) start_warning();
+        if (!midBossDone && MIDBOSS_AT(stg) && stageT >= MIDBOSS_AT(stg)) {
+            start_midboss_seq();
+        } else if (stageT >= BOSS_AT(stg) && enemyCount == 0) {
+            start_warning();
+        }
+        break;
+    case ST_MIDBOSS:
+        /* 中ボス中は新しい編隊を出さない(stageT も進めない)。
+           既に出ている敵と地上物はそのまま流れていく */
         break;
     case ST_WARNING:
         if (--stateTimer <= 0) { clear_center_msg(); start_boss(); }
@@ -1260,6 +1542,12 @@ static void frame_stage(void)
     items_update();
     effects_update();
     if (boss.active) boss_update();
+    if (midBoss.active) {
+        if (!midboss_update()) end_midboss_seq();
+    }
+
+    /* ボーナス表示は状態に関わらず消す */
+    if (midBossMsg > 0 && --midBossMsg == 0) clear_center_msg();
 
     collide();
 

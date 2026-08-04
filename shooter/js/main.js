@@ -111,6 +111,11 @@ window.onload = function () {
                 AudioMgr.stopBgm();
                 game.replaceScene(makeStageScene(n));
             },
+            /* 中ボス演出を即開始 */
+            midboss: function () {
+                var s = game.currentScene;
+                if (s && s.debug) { s.debug.startMidBoss(); }
+            },
             /* 現ステージのボス戦へスキップ */
             boss: function () {
                 var s = game.currentScene;
@@ -129,10 +134,11 @@ window.onload = function () {
         };
         document.addEventListener('keydown', function (ev) {
             if (ev.keyCode >= 49 && ev.keyCode <= 51) { window.__dbg.stage(ev.keyCode - 49); } // 1-3
+            if (ev.keyCode === 78) { window.__dbg.midboss(); } // N
             if (ev.keyCode === 66) { window.__dbg.boss(); }  // B
             if (ev.keyCode === 75) { window.__dbg.kill(); }  // K
             if (ev.keyCode === 71) { window.__dbg.god(); }   // G
         }, true);
-        console.log('[debug] 1/2/3: stage jump, B: skip to boss, K: kill boss, G: god mode');
+        console.log('[debug] 1/2/3: stage jump, N: mid-boss, B: skip to boss, K: kill boss, G: god mode');
     }
 };

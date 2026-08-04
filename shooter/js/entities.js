@@ -215,6 +215,14 @@ var Enemy = Class.create(Sprite, {
             if (t > 40) { this.vx -= 0.12; this.vy = Math.max(0.6, this.vy - 0.05); }
             this.x += this.vx; this.y += this.vy;
             break;
+        /*
+         * 地上物。背景と同じ速度で流れるので「地面に固定されている」ように見える。
+         * 空中物との違いは移動だけで、当たり判定・破壊のされ方は同じ
+         * (通常ショットで壊せる)。
+         */
+        case 'ground':
+            this.y += scene.scrollSpeed;
+            break;
         case 'hover':
             if (this.y < 90) {
                 this.y += this.speed;
@@ -408,6 +416,217 @@ var Boss = Class.create(Sprite, {
             return true;
         }
         return false;
+    }
+});
+
+/* ---------- 中ボス ---------- */
+
+/*
+ * コア1つ + 四方(上下左右)のパーツ4つで構成される中ボス。
+ *
+ *   enter … コアが画面上部へ降りてくる           (無敵)
+ *   hold  … 四方にパーツが出現して静止           (無敵) CONFIG.MIDBOSS.holdFrames
+ *   merge … パーツがコアへ集まる                 (有効) CONFIG.MIDBOSS.mergeFrames
+ *           ここで hp 発当てて壊すと bonusScore + ファンファーレ
+ *   full  … 合体完了。hpを戻して通常戦闘          (有効)
+ *           壊すと normalScore。fullTimeout で去る
+ *   dying … 爆発演出
+ *
+ * 当たり判定はコアと4パーツそれぞれに持たせ、ダメージは1つのHPに集約する
+ * (どこを撃っても「八発当てれば壊れる」)。
+ */
+var MIDBOSS_DIRS = [
+    [ 0, -1],   /* 上 */
+    [ 0,  1],   /* 下 */
+    [-1,  0],   /* 左 */
+    [ 1,  0]    /* 右 */
+];
+
+var MidBoss = Class.create(Group, {
+    initialize: function () {
+        var cfg = CONFIG.MIDBOSS, i, p;
+        Group.call(this);
+
+        this.cfg = cfg;
+
+        /*
+         * パーツを先に addChild してコアを後にする = パーツがコアの下に描かれる。
+         * こうするとコアの装甲リングとソケットの爪がパーツの上に残り、
+         * 「掴んで固定している」ように見える。
+         */
+        this.parts = [];
+        for (i = 0; i < 4; i++) {
+            p = new Sprite(ASSETS.img.midpart.fw, ASSETS.img.midpart.fh);
+            p.image = imgAsset('midpart');
+            p.frame = flickFrames(6);
+            p.visible = false;
+            this.addChild(p);
+            this.parts.push(p);
+        }
+
+        this.core = new Sprite(ASSETS.img.midcore.fw, ASSETS.img.midcore.fh);
+        this.core.image = imgAsset('midcore');
+        this.core.frame = flickFrames(8);
+        this.addChild(this.core);
+
+        this.state = 'enter';
+        this.t = 0;
+        this.hp = cfg.hp;
+        this.flash = 0;
+        this.shootTimer = cfg.shootEvery;
+        this.result = null;          /* 'bonus' | 'normal' | 'escaped' */
+
+        /* コアは画面上部中央へ */
+        this.cx = CONFIG.WIDTH / 2;
+        this.cy = -this.core.height / 2;
+        this.targetCy = cfg.coreY + this.core.height / 2;
+        this.layout();
+    },
+
+    /* コア中心とパーツ位置を実際のスプライト座標へ反映する */
+    layout: function (partR) {
+        var i, d, px, py;
+        this.core.x = this.cx - this.core.width / 2;
+        this.core.y = this.cy - this.core.height / 2;
+        if (partR === undefined) { return; }
+        for (i = 0; i < 4; i++) {
+            d = MIDBOSS_DIRS[i];
+            px = this.cx + d[0] * partR;
+            py = this.cy + d[1] * partR;
+            this.parts[i].x = px - this.parts[i].width / 2;
+            this.parts[i].y = py - this.parts[i].height / 2;
+            this.parts[i].visible = true;
+        }
+    },
+
+    /*
+     * 透明度。enchant の Group は opacity を持たない(Entity のプロパティ)ため、
+     * コアと各パーツに個別に設定する。
+     */
+    setAlpha: function (a) {
+        var i;
+        this.core.opacity = a;
+        for (i = 0; i < 4; i++) { this.parts[i].opacity = a; }
+    },
+
+    /* 攻撃が通る状態か(パーツの移動開始前は効かない) */
+    vulnerable: function () {
+        return this.state === 'merge' || this.state === 'full';
+    },
+
+    /* 当たり判定の対象(コア + 表示中のパーツ) */
+    targets: function () {
+        var list = [{
+            x: this.cx, y: this.cy,
+            r: this.core.width * 0.36
+        }], i, p;
+        for (i = 0; i < 4; i++) {
+            p = this.parts[i];
+            if (!p.visible) { continue; }
+            list.push({
+                x: p.x + p.width / 2,
+                y: p.y + p.height / 2,
+                r: p.width * 0.36
+            });
+        }
+        return list;
+    },
+
+    /* 戻り値: 撃破したら 'bonus'(合体前) / 'normal'(合体後)、まだなら null */
+    damage: function (n) {
+        if (!this.vulnerable()) { return null; }
+        this.hp -= n;
+        this.flash = 3;
+        if (this.hp > 0) {
+            AudioMgr.playSe('hit');
+            return null;
+        }
+        this.hp = 0;
+        this.result = (this.state === 'merge') ? 'bonus' : 'normal';
+        this.state = 'dying';
+        this.t = 0;
+        AudioMgr.playSe(this.result === 'bonus' ? 'fanfare' : 'boss_explosion');
+        return this.result;
+    },
+
+    update: function (scene) {
+        var cfg = this.cfg, t = ++this.t, k;
+
+        switch (this.state) {
+        case 'enter':
+            this.cy += 1.6;
+            if (this.cy >= this.targetCy) {
+                this.cy = this.targetCy;
+                this.state = 'hold';
+                this.t = 0;
+                this.layout(cfg.ringR);      /* 四方にパーツを出現させる */
+            } else {
+                this.layout();
+            }
+            break;
+
+        case 'hold':
+            /* 無敵。パーツは静止したまま点滅で「まだ触れない」ことを示す */
+            this.layout(cfg.ringR);
+            if (t >= cfg.holdFrames) { this.state = 'merge'; this.t = 0; }
+            break;
+
+        case 'merge':
+            k = Math.min(1, t / cfg.mergeFrames);
+            this.layout(cfg.ringR + (cfg.attachR - cfg.ringR) * k);
+            if (t >= cfg.mergeFrames) {
+                /* 合体成立。HPを戻して通常戦闘へ */
+                this.state = 'full';
+                this.t = 0;
+                this.hp = cfg.hp;
+                this.shootTimer = 30;
+            }
+            break;
+
+        case 'full':
+            this.cx = CONFIG.WIDTH / 2 + Math.sin(t * 0.025) * 90;
+            this.cy = this.targetCy + Math.sin(t * 0.017) * 14;
+            this.layout(cfg.attachR);
+            if (--this.shootTimer <= 0) {
+                this.shootTimer = cfg.shootEvery;
+                fireAimed(scene, this.cx, this.cy + 20, 3, 0.26, 3.0);
+            }
+            if (t >= cfg.fullTimeout) {       /* 倒せないままなら去る(進行不能の防止) */
+                this.result = 'escaped';
+                this.state = 'dying';
+                this.t = 0;
+            }
+            break;
+
+        case 'dying':
+            if (this.result === 'escaped') {
+                this.cy -= 3;                 /* 上へ退場 */
+                this.layout(cfg.attachR);
+                if (this.cy < -this.core.height) { return false; }
+            } else {
+                if (t % 7 === 0) {
+                    scene.addEffect(new Explosion(
+                        this.cx + rand(-40, 40), this.cy + rand(-40, 40)));
+                    /* ボーナス時はファンファーレを爆発音で潰さない */
+                    if (this.result !== 'bonus') { AudioMgr.playSe('explosion'); }
+                }
+                if (t >= 80) { return false; }
+            }
+            break;
+        }
+
+        /* 見た目: 撃破中はフェード、被弾直後は点滅、静止中(無敵)は薄く点滅 */
+        if (this.state === 'dying' && this.result !== 'escaped') {
+            this.setAlpha(Math.max(0, 1 - this.t / 80));
+        } else if (this.flash > 0) {
+            this.flash--;
+            this.setAlpha(0.45);
+        } else if (this.state === 'hold') {
+            this.setAlpha((this.t % 10 < 5) ? 0.6 : 1);   // まだ攻撃が効かない合図
+        } else {
+            this.setAlpha(1);
+        }
+        return true;
     }
 });
 
