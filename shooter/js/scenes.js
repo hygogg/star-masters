@@ -478,10 +478,12 @@ function makeStageScene(stageIdx) {
                 var mb = scene.midBoss, pt = mb.partTargets(), m, blocked = false;
                 for (m = 0; m < pt.length; m++) {
                     if (!hitCircle(b.cx(), b.cy(), b.r, pt[m].x, pt[m].y, pt[m].r)) { continue; }
-                    mb.deflect(pt[m].idx);
                     gPlayerBullet.removeChild(b);
                     scene.playerBullets.splice(i, 1);
                     blocked = true;
+                    /* 合体後はパーツに当たってもダメージになる */
+                    if (mb.partsDamageable()) { onMidBossHit(mb.damage(1)); }
+                    else                      { mb.deflect(pt[m].idx); }
                     break;
                 }
                 if (!blocked && mb.coreVulnerable()) {

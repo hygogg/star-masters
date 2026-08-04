@@ -795,6 +795,19 @@ static bool midboss_core_vulnerable(void)
            (midBoss.state == MB_MERGE || midBoss.state == MB_FULL);
 }
 
+/*
+ * 合体後はパーツの無敵を解除する。
+ * 合体すると下側のパーツがコアの中央を完全に塞いでしまい
+ * (コア半径11.5 に対しパーツ半径5.8 + 弾3 で自機の弾列が全部止まる)、
+ * 通常形態が事実上倒せなくなるため。
+ * 合体後はパーツに当たった弾もコアと同じHPへのダメージとして扱う。
+ * 接触の致死判定は合体前後どちらも生きている(本体に触れれば死ぬ)。
+ */
+static bool midboss_parts_damageable(void)
+{
+    return midBoss.partsSolid && midBoss.state == MB_FULL;
+}
+
 /* パーツ i の中心座標 */
 static void midboss_part_pos(int i, int *px, int *py)
 {
@@ -1023,6 +1036,8 @@ static void collide(void)
                     if (!hit_circle(bx, by, b->r, tx, ty, pr)) continue;
                     b->active = false;
                     blocked = true;
+                    /* 合体後はパーツに当たってもダメージになる */
+                    if (midboss_parts_damageable()) on_midboss_hit(midboss_damage(1));
                     break;
                 }
             }
@@ -1669,6 +1684,15 @@ void game_init(void)
     start_title();
 }
 
+/* ポーズの切り替え。タイトル・ゲームオーバー・エンディング中は無効 */
+static void toggle_pause(void)
+{
+    if (state == ST_TITLE || state == ST_GAMEOVER || state == ST_ENDING) return;
+    paused = !paused;
+    if (paused) txt_center(SCREEN_TOP, 17, "PAUSE", TXT_GOLD);
+    else        txt_put(SCREEN_TOP, 0, 17, "                                ", TXT_WHITE);
+}
+
 void game_frame(void)
 {
     scanKeys();
@@ -1677,14 +1701,20 @@ void game_frame(void)
     /* SELECT: ミュート */
     if (keysDown() & KEY_SELECT) snd_toggle_mute();
 
-    /* START: ポーズ(ステージ中のみ) */
-    if ((keysDown() & KEY_START) &&
-        (state == ST_INTRO || state == ST_PLAY ||
-         state == ST_WARNING || state == ST_BOSS || state == ST_CLEAR)) {
-        paused = !paused;
-        if (paused) txt_center(SCREEN_TOP, 17, "PAUSE", TXT_GOLD);
-        else        txt_put(SCREEN_TOP, 0, 17, "                                ", TXT_WHITE);
-    }
+    /*
+     * START: ポーズ。
+     * 以前は「ポーズできる状態」を列挙していたため、状態を追加するたびに
+     * 入れ忘れが起きた(ST_MIDBOSS がまさにそれで、中ボス中は効かなかった)。
+     * ポーズできない状態だけを除外する形にして、状態追加に強くしてある。
+     */
+    if (keysDown() & KEY_START) toggle_pause();
+#ifdef TEST_PAUSE
+    /*
+     * 検証用: 中ボスの真っ最中(TEST_FAST 進行での 550F 付近)でポーズし、
+     * そのまま解除しない。以降の画面が凍っていればポーズが効いている。
+     */
+    if (frameCounter == 550) toggle_pause();
+#endif
     if (paused) return;
 
     switch (state) {

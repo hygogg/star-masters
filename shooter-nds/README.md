@@ -65,6 +65,9 @@ docker run --rm -v "$PWD:/w" -w /w devkitpro/devkitarm:latest make CFLAGS_EXTRA=
 
 # 合体猶予中にコアへ何発当たるか実測する(HUDに MERGE HITS を表示)
 docker run --rm -v "$PWD:/w" -w /w devkitpro/devkitarm:latest make CFLAGS_EXTRA="-DTEST_FAST -DTEST_MB_COUNT -DTEST_MB_DX=13 -DTEST_MB_Y=160"
+
+# 中ボスの真っ最中に自動でポーズする(ポーズが効いているかの確認用)
+docker run --rm -v "$PWD:/w" -w /w devkitpro/devkitarm:latest make CFLAGS_EXTRA="-DTEST_FAST -DTEST_PAUSE"
 ```
 
 `TEST_FAST` ならタイトル→3ステージ→各ボス→エンディングを数分で通せる。
@@ -167,8 +170,10 @@ Web版用のアセット(`../shooter/assets/`)は上記スクリプトでは変�
 - **地上物**: 背景と同速度で流れる固定設置物。通常ショットで破壊可。
   DSではスプライト優先度3で描き、他のスプライトより奥に置いている
 - **中ボス**: パーツが画面外から飛来 → コアの四方で1秒静止 → 1秒で合体。
-  パーツは静止した時点から**最後まで無敵の障害物**(ショットを弾き、接触で自機が死ぬ)。
-  狙えるのはコアだけで、合体までに **12発**当てると50000点、合体後に8発で1000点。
+  パーツは静止した時点から**無敵の障害物**(ショットを弾き、接触で自機が死ぬ)。
+  合体までは狙えるのはコアだけで、**12発**当てると50000点。
+  **合体と同時にパーツの無敵は解除**され、以降はどこに当てても8発で1000点
+  (盾のままだとコアの中央が塞がって倒せなくなるため)。
   パーツの合体位置は `MB_ATTACH_R`(12px)で、これはスプライト同士の
   噛み合わせなのでブラウザ版の x0.5(他の距離は x0.8)
 

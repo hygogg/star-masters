@@ -536,7 +536,19 @@ var MidBoss = Class.create(Group, {
         return { x: this.cx, y: this.cy, r: this.core.width * 0.36 };
     },
 
-    /* 障害物としてのパーツ(常に無敵。飛来中だけ判定なし) */
+    /*
+     * 合体後はパーツの無敵を解除する。
+     * 合体すると下側のパーツがコアの中央を完全に塞いでしまい
+     * (コア半径23 に対しパーツ半径11.5 + 弾5 で自機の弾列が全部止まる)、
+     * 通常形態が事実上倒せなくなるため。
+     * 合体後はパーツに当たった弾もコアと同じHPへのダメージとして扱う。
+     * 接触の致死判定は合体前後どちらも生きている(本体に触れれば死ぬ)。
+     */
+    partsDamageable: function () {
+        return this.partsSolid && this.state === 'full';
+    },
+
+    /* 当たり判定を持つパーツ(飛来中だけ判定なし) */
     partTargets: function () {
         var list = [], i, p;
         if (!this.partsSolid) { return list; }
