@@ -100,6 +100,7 @@ function makeTitleScene() {
     scene.addChild(title1);
     scene.addChild(title2);
     scene.addChild(makeLabel('- 8BIT VERTICAL SHOOTER -', 170, 12, '#80c0ff'));
+    scene.addChild(makeLabel(CONFIG.POWERED_BY, 192, 10, '#a0a0a0'));   // タイトル下のクレジット行
 
     var prompt = makeLabel('PRESS ANY KEY', 260, 14, '#ffffff', true);
     scene.addChild(prompt);

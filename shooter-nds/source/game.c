@@ -1500,6 +1500,7 @@ static void frame_title(void)
 
     txt_center(SCREEN_TOP, 6, "STAR MASTERS", TXT_GOLD);
     txt_center(SCREEN_TOP, 8, "- 8BIT VERTICAL SHOOTER -", TXT_CYAN);
+    txt_center(SCREEN_TOP, 10, "POWERED BY CYO", TXT_GREY);   /* タイトル下のクレジット行 */
     if ((frameCounter % 60) < 38)
         txt_center(SCREEN_TOP, 14, "PRESS A TO START", TXT_WHITE);
     else

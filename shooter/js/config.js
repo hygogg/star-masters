@@ -14,6 +14,7 @@
  */
 var CONFIG = {
     TITLE: 'STAR MASTERS',
+    POWERED_BY: 'POWERED BY CYO',
     WIDTH: 320,
     HEIGHT: 480,
     FPS: 60,
