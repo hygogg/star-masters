@@ -21,6 +21,7 @@ var GameState = {
     },
     addScore: function (n) {
         this.score += n;
+        if (DemoMgr.active) { return; }   // デモはハイスコアを動かさない
         if (this.score > this.hiScore) { this.hiScore = this.score; }
     },
     loadHiScore: function () {
@@ -29,11 +30,152 @@ var GameState = {
         } catch (e) { this.hiScore = 0; }
     },
     saveHiScore: function () {
+        if (DemoMgr.active) { return; }   // デモ中は保存しない
         try {
             localStorage.setItem(CONFIG.HISCORE_KEY, String(this.hiScore));
         } catch (e) {}
     }
 };
+
+/*
+ * デモ(アトラクトモード)の管理。
+ * 開始時に GameState を退避し、終了(タイムアウト/割り込み)時に完全に戻す。
+ * makeTitleScene / 通常の makeStageScene は先頭で end() を呼ぶので、
+ * どの経路でデモを抜けても復元される(end は active のときだけ働く)。
+ */
+var DemoMgr = {
+    active: false,
+    snap: null,
+    begin: function () {
+        if (this.active) { return; }
+        this.snap = {
+            score: GameState.score, hiScore: GameState.hiScore,
+            lives: GameState.lives, power: GameState.power,
+            stageIdx: GameState.stageIdx
+        };
+        this.active = true;
+    },
+    end: function () {
+        if (!this.active) { return; }
+        var s = this.snap;
+        GameState.score = s.score;
+        GameState.hiScore = s.hiScore;
+        GameState.lives = s.lives;
+        GameState.power = s.power;
+        GameState.stageIdx = s.stageIdx;
+        this.active = false;
+        this.snap = null;
+        DemoRng.on = false;
+    }
+};
+
+/* デモ開始(タイトルの無操作 / デバッグから) */
+function startDemo() {
+    DemoMgr.begin();
+    game.replaceScene(makeStageScene(0, { demo: true }));
+}
+
+/*
+ * デモAI。毎フレーム {left,right,up,down,shot} を返す。
+ * 優先度: (a)弾・敵本体の回避 > (b)ボス/中ボス/最寄りの敵の真下へ > (c)近くのアイテム。
+ * 縦位置は下から1/3あたりに保つ。
+ */
+function demoAI(scene) {
+    var p = scene.player, W = CONFIG.WIDTH, H = CONFIG.HEIGHT;
+    var px = p.cx(), py = p.cy();
+    var out = { left: false, right: false, up: false, down: false, shot: true };
+    var pushX = 0, pushY = 0, danger = false;
+    var i, e, b, d, k;
+
+    /* 脅威1つ分の評価。自機と同じ高さか上にあるものだけ(通り過ぎたものは無視) */
+    function threat(tx, ty, r, vx, vy, reach) {
+        var best = -1, bdx = 0, bay = 0, lim = reach + r * 0.5;
+        for (k = 0; k <= 8; k += 8) {   // 現在位置と8フレーム先
+            var ax = tx + vx * k, ay = ty + vy * k;
+            if (ay > py + 8) { continue; }
+            var dx = px - ax, dy = py - ay, dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < lim && (lim - dist) / lim > best) {
+                best = (lim - dist) / lim; bdx = dx; bay = ay;
+            }
+        }
+        if (best < 0) { return; }
+        danger = true;
+        pushX += (Math.abs(bdx) < 2 ? (px < W / 2 ? 1 : -1) : (bdx > 0 ? 1 : -1)) * best;
+        pushY += (bay < py ? 1 : -1) * best;   // 正=下へ逃げる
+    }
+
+    for (i = 0; i < scene.enemyBullets.length; i++) {
+        b = scene.enemyBullets[i];
+        threat(b.cx(), b.cy(), b.r, b.vx, b.vy, 40);
+    }
+    for (i = 0; i < scene.enemies.length; i++) {
+        e = scene.enemies[i];
+        threat(e.cx(), e.cy(), e.r, 0, e.vy || 0, 40);
+    }
+    if (scene.boss && scene.boss.state === 'fight') {
+        threat(scene.boss.cx(), scene.boss.cy(), scene.boss.r, 0, 0, 40);
+    }
+    if (scene.midBoss) {
+        var pt = scene.midBoss.partTargets();
+        for (i = 0; i < pt.length; i++) { threat(pt[i].x, pt[i].y, pt[i].r, 0, 0, 40); }
+        if (scene.midBoss.coreVulnerable()) {
+            var ct = scene.midBoss.coreTarget();
+            threat(ct.x, ct.y, ct.r, 0, 0, 40);
+        }
+    }
+
+    var half = p.height / 2;
+    if (danger && Math.abs(pushX) > 0.05) {
+        var hdir = pushX > 0 ? 1 : -1;
+        var pinned = (hdir < 0 && px < 22) || (hdir > 0 && px > W - 22);
+        if (!pinned) {
+            if (hdir < 0) { out.left = true; } else { out.right = true; }
+        } else {
+            /* 壁際に追い詰められたら縦に逃げる */
+            var down = pushY >= 0;
+            if (down && py > H - half - 6) { down = false; }
+            if (!down && py < 36 + half + 6) { down = true; }
+            if (down) { out.down = true; } else { out.up = true; }
+        }
+        return out;
+    }
+
+    /* 狙う x を決める */
+    var tx = W / 2, dead = 10, target = false;
+    if (scene.boss && scene.boss.state === 'fight') {
+        tx = scene.boss.cx(); dead = 6; target = true;
+    } else if (scene.midBoss && scene.midBoss.coreVulnerable()) {
+        var c = scene.midBoss.coreTarget();
+        /* 合体前は下パーツがショットを遮るので、コアの縁側から撃つ */
+        tx = c.x + (scene.midBoss.state === 'merge' ? (px < c.x ? -22 : 22) : 0);
+        dead = 6; target = true;
+    } else {
+        var bestD = 1e9;
+        for (i = 0; i < scene.enemies.length; i++) {
+            e = scene.enemies[i];
+            if (e.pattern === 'ground' || e.cy() > py - 10 || e.cy() < 30) { continue; }
+            d = Math.abs(e.cx() - px) + (py - e.cy()) * 0.5;
+            if (d < bestD) { bestD = d; tx = e.cx(); target = true; dead = 5; }
+        }
+    }
+    /* (c) 近くのアイテム */
+    var bestI = 1e9;
+    for (i = 0; i < scene.items.length; i++) {
+        var it = scene.items[i], idx = Math.abs(it.cx() - px);
+        if (idx < 100 && it.cy() > py - 160 && it.cy() < py + 10 && idx < bestI) {
+            bestI = idx; tx = it.cx(); dead = 3; target = true;
+        }
+    }
+
+    if (tx < px - dead) { out.left = true; }
+    else if (tx > px + dead) { out.right = true; }
+
+    /* 縦は下から1/3あたり(底に張り付かない) */
+    var ty = H - 90;
+    if (py < ty - 12) { out.down = true; }
+    else if (py > ty + 12) { out.up = true; }
+    return out;
+}
 
 /* ---------- 小道具 ---------- */
 
@@ -90,7 +232,9 @@ function makeTouchPad(scene) {
 
 /* ---------- タイトル ---------- */
 
-function makeTitleScene() {
+function makeTitleScene(opts) {
+    opts = opts || {};
+    DemoMgr.end();   // デモから戻ってきたときの GameState 復元(通常時は何もしない)
     var scene = new Scene();
     scene.backgroundColor = '#000';
     var bg = makeScrollBg(scene, 'bg1', 0.4);
@@ -118,6 +262,19 @@ function makeTitleScene() {
     var starting = -1;
     var armed = false;       // ボタンが一度離されるまで開始を受け付けない
     var readyPrev = ready;   // タッチ用: 前フレーム時点で解禁済みだったか
+    var idle = 0;            // 無操作フレーム数(CONFIG.DEMO.idleFrames でデモ開始)
+    /* デモを抜けたタップがそのまま開始にならないよう、タッチは少しの間無視する */
+    var touchWait = opts.fromDemo ? 30 : 0;
+
+    /* 未割り当てキーも含めた入力でアイドルをリセット(main.js から呼ばれる) */
+    scene.onAnyInput = function () { idle = 0; };
+
+    function anyInput() {
+        for (var k in game.input) {
+            if (game.input[k] === true) { return true; }
+        }
+        return false;
+    }
 
     /* 最初の入力で音を解禁、次の入力で開始(main.js の unlockHandler から呼ばれる) */
     scene.onUnlock = function () {
@@ -140,6 +297,7 @@ function makeTitleScene() {
     scene.on('enterframe', function () {
         bg.update();
         if (starting >= 0) {
+            idle = 0;
             prompt.visible = (starting % 6 < 3);   // 開始演出: 高速点滅
             if (--starting <= 0) {
                 game.replaceScene(makeStageScene(0));
@@ -151,26 +309,45 @@ function makeTitleScene() {
         if (!inputShot()) { armed = true; }
         else if (armed && ready) { startGame(); }
         readyPrev = ready;
+        if (touchWait > 0) { touchWait--; }
+
+        /* 無操作が続いたらデモプレイ */
+        if (anyInput()) { idle = 0; }
+        else if (++idle >= CONFIG.DEMO.idleFrames) { startDemo(); }
     });
 
     var pad = makeTouchPad(scene);
     pad.on('touchstart', function () {
+        idle = 0;
         /* 未解禁時のアンロックは main.js の document リスナーが担当。
            解禁と同時のタップでは開始しない(readyPrev で1フレーム置く) */
-        if (readyPrev) { startGame(); }
+        if (readyPrev && touchWait <= 0) { startGame(); }
     });
     return scene;
 }
 
 /* ---------- ステージ ---------- */
 
-function makeStageScene(stageIdx) {
+function makeStageScene(stageIdx, opts) {
     var stage = CONFIG.STAGES[stageIdx];
+    var demo = !!(opts && opts.demo);
     GameState.stageIdx = stageIdx;
+    if (demo) {
+        /* デモ: 毎ステージ満タンの残機・スコア0・ステージ相応のパワー。乱数も固定 */
+        DemoMgr.begin();
+        GameState.score = 0;
+        GameState.lives = CONFIG.PLAYER.lives;
+        GameState.power = Math.max(1, Math.min(CONFIG.PLAYER.maxPower, stageIdx + 1));
+        DemoRng.seed = 12345 + stageIdx * 777;
+        DemoRng.on = true;
+    } else {
+        DemoMgr.end();   // デバッグ等でデモ中に通常ステージへ入った場合の復元
+    }
 
     var scene = new Scene();
     scene.backgroundColor = '#000';
     scene.paused = false;
+    scene.demo = demo;
 
     var bg = makeScrollBg(scene, stage.bg, stage.scroll);
     scene.scrollSpeed = stage.scroll;   /* 地上物がこの速度で流れる */
@@ -216,6 +393,7 @@ function makeStageScene(stageIdx) {
     /* 自機 */
     var player = new Player();
     scene.player = player;
+    if (demo) { player.invincible = 0; }   // 点滅させないため無敵は使わない(死亡処理を飛ばす)
     gPlayer.addChild(player);
 
     /* ---------- HUD ---------- */
@@ -286,6 +464,15 @@ function makeStageScene(stageIdx) {
     gUi.addChild(centerMsg);
     gUi.addChild(subMsg);
 
+    /* デモ表示(HUD・中央メッセージ・ボスHPバーと重ならない画面下部) */
+    var demoMsg = null, demoMsg2 = null;
+    if (demo) {
+        demoMsg = makeLabel('DEMO PLAY', 424, 16, '#ff8040', true);
+        demoMsg2 = makeLabel('PRESS Z / TAP TO START', 450, 10, '#ffffff');
+        gUi.addChild(demoMsg);
+        gUi.addChild(demoMsg2);
+    }
+
     var pauseMsg = makeLabel('PAUSE', 220, 22, '#ffff80', true);
     pauseMsg.visible = false;
     gUi.addChild(pauseMsg);
@@ -301,8 +488,16 @@ function makeStageScene(stageIdx) {
     var midBossMsg = 0;            // ボーナス表示の残りフレーム
     var deathTimer = -1;           // 自機死亡からの復帰カウンタ
     var gameOverTimer = -1;
+    var demoTimer = 0;             // デモ経過フレーム(シーン開始から。イントロ込み)
 
     AudioMgr.playBgm(stage.bgm);
+
+    /* デモ終了(タイムアウト/キー・タッチの割り込み)。GameState を戻してタイトルへ */
+    scene.demoExit = function () {
+        DemoMgr.end();
+        AudioMgr.stopBgm();
+        game.replaceScene(makeTitleScene({ fromDemo: true }));
+    };
 
     function runSpawners() {
         /* 新しい wave の開始 */
@@ -412,6 +607,7 @@ function makeStageScene(stageIdx) {
     };
 
     function killPlayer() {
+        if (demo) { return; }   // デモでは死なない(接触した弾・敵は消えるだけ)
         if (!player.alive || player.invincible > 0) { return; }
         player.alive = false;
         player.visible = false;
@@ -573,6 +769,21 @@ function makeStageScene(stageIdx) {
     /* ---------- メインループ ---------- */
     scene.on('enterframe', function () {
         if (scene.paused) { return; }
+
+        /* デモ: 一定時間で次のデモステージへ。最後はタイトルへ戻る */
+        if (demo) {
+            demoTimer++;
+            if (demoTimer >= CONFIG.DEMO.stageFrames) {
+                if (stageIdx + 1 < CONFIG.STAGES.length) {
+                    game.replaceScene(makeStageScene(stageIdx + 1, { demo: true }));
+                } else {
+                    scene.demoExit();
+                }
+                return;
+            }
+            demoMsg.visible = demoMsg2.visible = (demoTimer % 60 < 38);
+            player.demoInput = demoAI(scene);
+        }
         bg.update();
 
         /* 進行状態 */
@@ -598,7 +809,9 @@ function makeStageScene(stageIdx) {
             subMsg.visible = centerMsg.visible;
             if (--stateTimer <= 0) { startBoss(); }
         } else if (state === 'clear') {
-            if (--stateTimer <= 0) {
+            if (demo) {
+                /* デモはタイマーが遷移を担当(次ステージ/エンディングへは進まない) */
+            } else if (--stateTimer <= 0) {
                 if (stageIdx + 1 < CONFIG.STAGES.length) {
                     game.replaceScene(makeStageScene(stageIdx + 1));
                 } else {
@@ -668,9 +881,11 @@ function makeStageScene(stageIdx) {
     /* タッチ操作(最前面の透明パッドで受ける) */
     var pad = makeTouchPad(scene);
     pad.on('touchstart', function (ev) {
+        if (demo) { scene.demoExit(); return; }
         player.touchTarget = { x: ev.x, y: ev.y };
     });
     pad.on('touchmove', function (ev) {
+        if (demo) { return; }
         player.touchTarget = { x: ev.x, y: ev.y };
     });
     pad.on('touchend', function () {

@@ -68,6 +68,9 @@ docker run --rm -v "$PWD:/w" -w /w devkitpro/devkitarm:latest make CFLAGS_EXTRA=
 
 # 中ボスの真っ最中に自動でポーズする(ポーズが効いているかの確認用)
 docker run --rm -v "$PWD:/w" -w /w devkitpro/devkitarm:latest make CFLAGS_EXTRA="-DTEST_FAST -DTEST_PAUSE"
+
+# デモプレイ(アトラクトモード)を短時間で見る: タイトル無操作1秒でデモ開始、各ステージ10秒
+docker run --rm -v "$PWD:/w" -w /w devkitpro/devkitarm:latest make CFLAGS_EXTRA="-DDEMO_IDLE_FRAMES=60 -DDEMO_STAGE_FRAMES=600"
 ```
 
 `TEST_FAST` ならタイトル→3ステージ→各ボス→エンディングを数分で通せる。
@@ -82,6 +85,7 @@ docker run --rm -v "$PWD:/w" -w /w devkitpro/devkitarm:latest make CFLAGS_EXTRA=
 | ミュート | SELECT |
 
 タッチ操作中はオート連射。指の少し上に自機が追従する。
+タイトルで15秒間何も操作しないとデモプレイが始まる(ボタン・十字キー・タッチで終了してタイトルへ戻る)。
 
 ## 画面構成
 

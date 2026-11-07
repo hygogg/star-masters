@@ -211,3 +211,12 @@ var CONFIG = {
         }
     ]
 };
+
+/*
+ * アトラクトモード(デモプレイ)。タイトルで無操作が続くと STAGE1〜3 を自動プレイする。
+ * 値はフレーム数(CONFIG.FPS 基準で秒から換算)。
+ */
+CONFIG.DEMO = {
+    idleFrames: 15 * CONFIG.FPS,    // タイトル無操作(15秒)でデモ開始
+    stageFrames: 20 * CONFIG.FPS    // 1ステージあたりのデモ時間(20秒・イントロ込み)
+};

@@ -90,6 +90,29 @@ static int mbHitCount;
   #define T_AUTOAIM  0
 #endif
 
+/*
+ * デモプレイ(アトラクトモード)。タイトルで放置すると自動プレイを見せる。
+ *   DEMO_IDLE_FRAMES  … タイトルで無操作のままデモに入るまで(既定 15秒)
+ *   DEMO_STAGE_FRAMES … デモ1ステージの長さ(start_stage からの数え。既定 20秒)
+ * 動作確認: make CFLAGS_EXTRA="-DDEMO_IDLE_FRAMES=60 -DDEMO_STAGE_FRAMES=600"
+ */
+#ifndef DEMO_IDLE_FRAMES
+  #define DEMO_IDLE_FRAMES  900
+#endif
+#ifndef DEMO_STAGE_FRAMES
+  #define DEMO_STAGE_FRAMES 1200
+#endif
+#define DEMO_STAGES 3
+#define DEMO_DANGER_R 32          /* 回避を始める距離(px) */
+
+/* デモ中の状態。demo が true の間は gs.hiScore を動かさず、自機は死なない */
+static bool      demo;
+static int       demoIdle;        /* タイトルでの無操作フレーム数 */
+static int       demoT;           /* 現デモステージの経過フレーム */
+static int       demoStage;       /* 0..DEMO_STAGES-1 */
+static int       demoKeys;        /* AI が出した今フレームのキー */
+static GameState demoSaved;       /* デモ開始前の gs(終了時に復元) */
+
 GameState gs;
 
 /* ---------- 乱数 (線形合同法) ---------- */
@@ -185,7 +208,7 @@ static const Stage *stg;     /* 現ステージ */
  * (製品ビルドでは keysHeld() を呼ぶだけにコンパイルされる)
  */
 #ifdef TEST_INPUT
-static int held_keys(void)
+static int held_keys_real(void)
 {
     int t = frameCounter % 540;
     int k = KEY_A;                       /* 常時ショット */
@@ -196,8 +219,11 @@ static int held_keys(void)
     return k;
 }
 #else
-static inline int held_keys(void) { return keysHeld(); }
+static inline int held_keys_real(void) { return keysHeld(); }
 #endif
+
+/* デモ中は AI の出力(1フレームに1回 game_frame で計算)に差し替える */
+static inline int held_keys(void) { return demo ? demoKeys : held_keys_real(); }
 
 static inline int keysShot(void)  { return held_keys() & (KEY_A | KEY_B | KEY_X | KEY_Y); }
 
@@ -420,6 +446,7 @@ static void player_update(void)
 
 static void kill_player(void)
 {
+    if (demo) return;                    /* デモ中は死なない(点滅させないため無敵値は使わない) */
     if (!player.alive || player.invincible > 0) return;
     player.alive = false;
     player.touching = false;
@@ -483,7 +510,7 @@ static void enemy_kill(Enemy *e, bool byBullet)
     if (byBullet) {
         snd_se(SE_EXPLOSION);
         gs.score += e->score;
-        if (gs.score > gs.hiScore) gs.hiScore = gs.score;
+        if (!demo && gs.score > gs.hiScore) gs.hiScore = gs.score;
         if (e->drop) add_item(cx, cy);
     }
     e->active = false;
@@ -683,11 +710,11 @@ static void on_midboss_hit(int result)
 {
     if (result == MBR_BONUS) {
         gs.score += MB_BONUS_SCORE;
-        if (gs.score > gs.hiScore) gs.hiScore = gs.score;
+        if (!demo && gs.score > gs.hiScore) gs.hiScore = gs.score;
         midBossMsg = 150;
     } else if (result == MBR_NORMAL) {
         gs.score += MB_NORMAL_SCORE;
-        if (gs.score > gs.hiScore) gs.hiScore = gs.score;
+        if (!demo && gs.score > gs.hiScore) gs.hiScore = gs.score;
     }
 }
 
@@ -702,7 +729,7 @@ static void on_boss_dead(void)
 {
     boss.active = false;
     gs.score += stg->bossScore;
-    if (gs.score > gs.hiScore) gs.hiScore = gs.score;
+    if (!demo && gs.score > gs.hiScore) gs.hiScore = gs.score;
     snd_bgm_stop();
     snd_se(SE_CLEAR);
     state = ST_CLEAR;
@@ -1124,7 +1151,7 @@ static void collide(void)
         snd_se(SE_POWERUP);
         if (gs.power < PLAYER_MAX_POWER) { gs.power++; gs.score += 500; }
         else                             { gs.score += 1000; }
-        if (gs.score > gs.hiScore) gs.hiScore = gs.score;
+        if (!demo && gs.score > gs.hiScore) gs.hiScore = gs.score;
     }
 }
 
@@ -1259,6 +1286,7 @@ static void start_title(void)
     stateTimer = 0;
     titleArmed = false;
     paused = false;
+    demoIdle = 0;
     scrollAccum = 0;
     player.alive = false;
     gfx_load_bg(0);
@@ -1493,6 +1521,8 @@ static void draw_entities(void)
 /* 各シーンの1フレーム                                           */
 /* ============================================================ */
 
+static void demo_begin(void);          /* 定義は公開APIの前 */
+
 static void frame_title(void)
 {
     scrollAccum += FP(0.32);
@@ -1540,6 +1570,10 @@ static void frame_title(void)
         snd_bgm_stop();
         return;
     }
+
+    /* 無操作が続いたらデモへ(D-pad・ボタン・タッチどれでもリセット) */
+    if (keysHeld()) demoIdle = 0;
+    else if (++demoIdle >= DEMO_IDLE_FRAMES) { demo_begin(); return; }
 
     if (!keysShot()) titleArmed = true;
     else if (titleArmed) {
@@ -1633,6 +1667,7 @@ static void frame_stage(void)
         if (--stateTimer <= 0) { clear_center_msg(); start_boss(); }
         break;
     case ST_CLEAR:
+        if (demo) break;             /* デモの遷移は demoT が決める */
         if (--stateTimer <= 0) {
             clear_center_msg();
             if (stageIdx + 1 < STAGE_COUNT) start_stage(stageIdx + 1);
@@ -1685,9 +1720,166 @@ void game_init(void)
     start_title();
 }
 
+/* ---------- デモプレイ ---------- */
+
+/* デモステージごとの固定乱数シード(毎回同じ展開になる) */
+static const u32 DEMO_SEEDS[DEMO_STAGES] = { 0xD3A01u, 0xD3A02u, 0xD3A03u };
+
+/* デモの1ステージを始める。gs は毎回初期化(前ステージの成績を持ち越さない) */
+static void demo_start_segment(int n)
+{
+    demoStage = n;
+    demoT = 0;
+    game_srand(DEMO_SEEDS[n]);
+    gs.score = 0;
+    gs.lives = PLAYER_LIVES;
+    gs.power = (n + 1 > PLAYER_MAX_POWER) ? PLAYER_MAX_POWER : n + 1;
+    start_stage(n);              /* エンティティ・中ボス/ボス・メッセージ・ポーズを初期化 */
+}
+
+static void demo_begin(void)
+{
+    demoSaved = gs;
+    demo = true;
+    demoIdle = 0;
+    demo_start_segment(0);
+}
+
+/* デモ終了(時間切れでも割り込みでも共通)。gs を元に戻してタイトルへ */
+static void demo_end(void)
+{
+    demo = false;
+    gs = demoSaved;
+    snd_bgm_stop();
+    start_title();               /* titleArmed=false: 押しっぱなしでは開始しない。文字層も消える */
+}
+
+#define ABS_I(v) ((v) < 0 ? -(v) : (v))
+
+/*
+ * デモAI。KEY_* のマスクを返す(1フレームに1回)。
+ * 優先順: 回避 > アイテム > 標的の真下へ。常にショット。yは下1/3付近を保つ。
+ */
+static int demo_ai(void)
+{
+    int keys = KEY_A;
+    int px = cx_of(player.x, SPR_PLAYER), py = cy_of(player.y, SPR_PLAYER);
+    int push = 0;                /* 回避の横方向(負=左, 正=右) */
+    int i;
+    int tx = px;                 /* 狙う x */
+    bool danger = false, hasTarget = false;
+
+    if (!player.alive) return keys;
+
+    /* (a) 回避: 自機と同じかそれより上にある敵弾・敵本体 */
+    for (i = 0; i < MAX_EBULLETS; i++) {
+        int dx, dy;
+        if (!ebullets[i].active) continue;
+        dx = FX2I(ebullets[i].x) + spr_w(SPR_BULLET_E) / 2 - px;
+        dy = FX2I(ebullets[i].y) + spr_h(SPR_BULLET_E) / 2 - py;
+        if (dy > 6) continue;
+        if (dx * dx + dy * dy >= DEMO_DANGER_R * DEMO_DANGER_R) continue;
+        danger = true;
+        push += ((dx > 0) ? -1 : (dx < 0) ? 1 : (px < FIELD_W / 2 ? 1 : -1))
+                * (DEMO_DANGER_R - ABS_I(dx) + 1);
+    }
+    for (i = 0; i < MAX_ENEMIES; i++) {
+        Enemy *e = &enemies[i];
+        int dx, dy, r;
+        if (!e->active) continue;
+        dx = cx_of(e->x, e->spr) - px;
+        dy = cy_of(e->y, e->spr) - py;
+        r = DEMO_DANGER_R + e->r;
+        if (dy > 6 || dx * dx + dy * dy >= r * r) continue;
+        danger = true;
+        push += ((dx > 0) ? -1 : (dx < 0) ? 1 : (px < FIELD_W / 2 ? 1 : -1))
+                * (r - ABS_I(dx) + 1);
+    }
+    if (boss.active && boss.state == BOSS_FIGHT) {
+        int dx = cx_of(boss.x, boss.spr) - px, dy = cy_of(boss.y, boss.spr) - py;
+        int r = DEMO_DANGER_R + boss.r;
+        if (dy <= 6 && dx * dx + dy * dy < r * r) {
+            danger = true;
+            push += ((dx > 0) ? -1 : (dx < 0) ? 1 : (px < FIELD_W / 2 ? 1 : -1))
+                    * (r - ABS_I(dx) + 1);
+        }
+    }
+
+    if (danger) {
+        int dir = (push > 0) - (push < 0);
+        if (dir == 0) dir = (px < FIELD_W / 2) ? 1 : -1;
+        /* 画面端に追い詰められたら縦に逃げる(脅威は上なので下へ。下も端なら反転) */
+        if ((dir < 0 && px <= 14) || (dir > 0 && px >= FIELD_W - 14)) {
+            if (FX2I(player.y) < FIELD_H - spr_h(SPR_PLAYER) - 4) keys |= KEY_DOWN;
+            else dir = -dir;
+        }
+        if (dir < 0) keys |= KEY_LEFT; else keys |= KEY_RIGHT;
+        return keys;
+    }
+
+    /* (c) 近くにアイテムがあれば拾いに寄る(危険がない時だけ) */
+    for (i = 0; i < MAX_ITEMS; i++) {
+        int ix, iy;
+        if (!items[i].active) continue;
+        ix = FX2I(items[i].x) + spr_w(SPR_POWERUP) / 2;
+        iy = FX2I(items[i].y) + spr_h(SPR_POWERUP) / 2;
+        if (ABS_I(ix - px) < 56 && iy < py + 16 && py - iy < 96) {
+            tx = ix; hasTarget = true;
+            break;
+        }
+    }
+
+    /* (b) 標的の真下へ: ボス > 中ボスのコア(攻撃が通る時) > 最寄りの空中敵 */
+    if (!hasTarget) {
+        if (boss.active && boss.state != BOSS_DYING) {
+            tx = cx_of(boss.x, boss.spr); hasTarget = true;
+        } else if (midboss_core_vulnerable() && midBoss.state != MB_DYING) {
+            tx = FX2I(midBoss.cx); hasTarget = true;
+        } else {
+            int best = 0x7fffffff;
+            for (i = 0; i < MAX_ENEMIES; i++) {
+                Enemy *e = &enemies[i];
+                int dx, dy, d;
+                if (!e->active) continue;
+                dx = cx_of(e->x, e->spr) - px;
+                dy = cy_of(e->y, e->spr) - py;
+                if (dy > -8 || dy < -(FIELD_H)) continue;
+                if (cy_of(e->y, e->spr) < 0) continue;      /* まだ画面外 */
+                d = dx * dx + dy * dy;
+                if (d < best) { best = d; tx = cx_of(e->x, e->spr); hasTarget = true; }
+            }
+        }
+    }
+    if (hasTarget) {
+        if (tx < px - 4)      keys |= KEY_LEFT;
+        else if (tx > px + 4) keys |= KEY_RIGHT;
+    }
+
+    /* (d) 高さはフィールド下1/3(下端に張り付かない) */
+    {
+        int want = FIELD_H - 60;
+        if (py < want - 6)      keys |= KEY_DOWN;
+        else if (py > want + 6) keys |= KEY_UP;
+    }
+    return keys;
+}
+
+/* デモ中の表示(HUD=上画面0..3行・中央メッセージ=上画面11/13行・ポーズ=17行を避け、下画面の下部) */
+static void draw_demo_overlay(void)
+{
+    if ((frameCounter % 60) < 38) {
+        txt_center(SCREEN_BOTTOM, 20, "DEMO PLAY", TXT_GOLD);
+        txt_center(SCREEN_BOTTOM, 22, "PRESS A TO START", TXT_WHITE);
+    } else {
+        txt_center(SCREEN_BOTTOM, 20, "         ", TXT_GOLD);
+        txt_center(SCREEN_BOTTOM, 22, "                ", TXT_WHITE);
+    }
+}
+
 /* ポーズの切り替え。タイトル・ゲームオーバー・エンディング中は無効 */
 static void toggle_pause(void)
 {
+    if (demo) return;            /* デモ中はポーズ不可 */
     if (state == ST_TITLE || state == ST_GAMEOVER || state == ST_ENDING) return;
     paused = !paused;
     if (paused) txt_center(SCREEN_TOP, 17, "PAUSE", TXT_GOLD);
@@ -1701,6 +1893,27 @@ void game_frame(void)
 
     /* SELECT: ミュート */
     if (keysDown() & KEY_SELECT) snd_toggle_mute();
+
+    /*
+     * デモ: 新規押下(A/B/X/Y/START/タッチ/十字キー)で即終了。
+     * toggle_pause より前に判定するので START でポーズされない。
+     */
+    if (demo) {
+        if (keysDown() & (KEY_A | KEY_B | KEY_X | KEY_Y | KEY_START | KEY_TOUCH |
+                          KEY_UP | KEY_DOWN | KEY_LEFT | KEY_RIGHT)) {
+            demo_end();
+            return;
+        }
+        if (++demoT >= DEMO_STAGE_FRAMES) {
+            if (demoStage + 1 < DEMO_STAGES && demoStage + 1 < STAGE_COUNT)
+                demo_start_segment(demoStage + 1);
+            else {
+                demo_end();
+                return;
+            }
+        }
+        demoKeys = demo_ai();
+    }
 
     /*
      * START: ポーズ。
@@ -1724,4 +1937,6 @@ void game_frame(void)
     case ST_ENDING:   frame_ending();   break;
     default:          frame_stage();    break;
     }
+
+    if (demo) draw_demo_overlay();
 }

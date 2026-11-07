@@ -11,8 +11,21 @@ function imgAsset(key) {
     return game.assets[ASSETS.img[key].path];
 }
 
+/*
+ * デモ中だけシード固定の乱数(LCG)にして、毎回同じ展開にする。
+ * 通常プレイは Math.random のまま。
+ */
+var DemoRng = { on: false, seed: 1 };
+
 function rand(a, b) {
-    return a + Math.random() * (b - a);
+    var r;
+    if (DemoRng.on) {
+        DemoRng.seed = (DemoRng.seed * 1664525 + 1013904223) % 4294967296;
+        r = DemoRng.seed / 4294967296;
+    } else {
+        r = Math.random();
+    }
+    return a + r * (b - a);
 }
 
 /* 円同士の当たり判定 */
@@ -45,6 +58,7 @@ var Player = Class.create(Sprite, {
         this.cooldown = 0;
         this.invincible = CONFIG.PLAYER.respawnInvincible;
         this.touchTarget = null;   // タッチ操作の目標座標
+        this.demoInput = null;     // デモ中の入力({left,right,up,down,shot})
         this.setCenter(CONFIG.WIDTH / 2, CONFIG.HEIGHT - 50);
     },
     setCenter: function (cx, cy) {
@@ -58,14 +72,22 @@ var Player = Class.create(Sprite, {
         if (!this.alive) { return; }
         var sp = CONFIG.PLAYER.speed;
         var input = game.input;
+        var demo = this.demoInput;   // デモ中は AI の出力を入力の代わりに使う
 
-        if (input.left || input.left2)   { this.x -= sp; }
-        if (input.right || input.right2) { this.x += sp; }
-        if (input.up || input.up2)       { this.y -= sp; }
-        if (input.down || input.down2)   { this.y += sp; }
+        if (demo) {
+            if (demo.left)  { this.x -= sp; }
+            if (demo.right) { this.x += sp; }
+            if (demo.up)    { this.y -= sp; }
+            if (demo.down)  { this.y += sp; }
+        } else {
+            if (input.left || input.left2)   { this.x -= sp; }
+            if (input.right || input.right2) { this.x += sp; }
+            if (input.up || input.up2)       { this.y -= sp; }
+            if (input.down || input.down2)   { this.y += sp; }
+        }
 
-        /* タッチ操作: 指の少し上に追従 */
-        if (this.touchTarget) {
+        /* タッチ操作: 指の少し上に追従(デモ中は無効) */
+        if (this.touchTarget && !demo) {
             var tx = this.touchTarget.x - this.width / 2;
             var ty = this.touchTarget.y - 40 - this.height / 2;
             this.x += Math.max(-6, Math.min(6, tx - this.x));
@@ -77,7 +99,7 @@ var Player = Class.create(Sprite, {
 
         /* ショット(タッチ中はオート連射) */
         if (this.cooldown > 0) { this.cooldown--; }
-        if ((inputShot() || this.touchTarget) && this.cooldown <= 0) {
+        if ((demo ? demo.shot : (inputShot() || this.touchTarget)) && this.cooldown <= 0) {
             this.shoot(scene);
             this.cooldown = CONFIG.PLAYER.shotInterval;
         }

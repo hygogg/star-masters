@@ -82,6 +82,13 @@ window.onload = function () {
 
     /* P: ポーズ / M: ミュート(ポーズ中でも効くよう document で拾う) */
     document.addEventListener('keydown', function (ev) {
+        var cs = game.currentScene;
+        /* デモ中は任意のキーでタイトルへ(P のポーズはこの押下では発動させない) */
+        if (cs && cs.demo && cs.demoExit) {
+            if (!ev.ctrlKey && !ev.metaKey && !ev.altKey) { cs.demoExit(); }
+            return;
+        }
+        if (cs && cs.onAnyInput) { cs.onAnyInput(); }   // タイトルのアイドルリセット
         if (ev.keyCode === 80) {           // P
             var s = game.currentScene;
             if (s && typeof s.paused === 'boolean') {
@@ -107,6 +114,7 @@ window.onload = function () {
         window.__dbg = {
             /* n = 0..2 のステージへ即ジャンプ */
             stage: function (n) {
+                DemoMgr.end();
                 if (GameState.lives <= 0) { GameState.reset(); }
                 AudioMgr.stopBgm();
                 game.replaceScene(makeStageScene(n));
@@ -126,6 +134,8 @@ window.onload = function () {
                 var s = game.currentScene;
                 if (s && s.debug) { s.debug.killBoss(); }
             },
+            /* デモプレイを即開始 */
+            demo: function () { startDemo(); },
             /* 無敵化 */
             god: function () {
                 var s = game.currentScene;
