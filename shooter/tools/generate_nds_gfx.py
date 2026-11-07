@@ -888,6 +888,11 @@ def emit_source(spr_pal256, sprites, bgs, font_tiles, font_pal16):
                  (name, name, name, name))
     L.append("};")
     L.append("")
+    # The glyphs come from a third-party MIT font: keep its notice with the data.
+    L.append("// Font glyphs (ASCII 32..95): Pimoroni microdot-phat font.py")
+    L.append("// https://github.com/pimoroni/microdot-phat")
+    L.append("// MIT License, Copyright (c) 2017 Pimoroni Ltd.")
+    L.append("// Full license text: THIRD-PARTY-NOTICES.md / shooter-nds/licenses/")
     L.append("const u8 font_tiles[%d] ALIGN(4) = {" % len(font_tiles))
     L.append(fmt_u8(font_tiles))
     L.append("};")

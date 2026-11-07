@@ -13,3 +13,6 @@ shooter-nds/*.map
 
 # 生成スクリプトが吐く確認用プレビュー
 shooter/_preview/
+
+# 配布用ZIP (make-dist.sh の出力)
+shooter-nds/dist/

@@ -4,6 +4,7 @@
 **ブラウザ版**と**ニンテンドーDS版**の2つがあり、同じゲームを同じ素材から動かしている。
 
 全3ステージ、各ステージ末にボス、3体倒すとエンディング(スタッフロール)。
+タイトルで15秒放置すると、ゲームセンターのようにステージ1〜3のデモプレイが流れる。
 
 ![DS版の動作画面](shooter-nds/screenshots.png)
 
@@ -41,9 +42,10 @@ docker run --rm -v "$PWD:/w" -w /w devkitpro/devkitarm:latest make
 フラッシュカートから起動する(homebrewなので特別なパッチは不要)。
 melonDS などのエミュレータでも動く。
 
-> ビルド済みROMはリポジトリに含めていない。ROMには libnds / maxmod / newlib が
-> 静的リンクされ、再配布するとそれらのライセンス表記義務が発生するため。
-> 詳細は [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) を参照。
+> ビルド済みROMはリポジトリに含めていない。ROMには calico / libnds / maxmod / newlib などが
+> 組み込まれ、再配布するとそれらのライセンス表記義務が発生するため。
+> ROMを配る場合は `./make-dist.sh` で、ライセンス文(`licenses/`)とビルド環境の記録を
+> 同梱したZIPを作れる。詳細は [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) を参照。
 
 移動: 十字キー / 下画面タッチ、ショット: A B X Y、ポーズ: START、ミュート: SELECT。
 
@@ -88,16 +90,18 @@ DS版の値はブラウザ版の x0.8(320x480 → 256x384 は縦横比が同じ�
 
 ## 素材の出所
 
-**ドット絵・BGM・SE・ゲームコードはすべて新規に作ったもの**で、外部から取り込んだ
-素材は一切含まれていない。ドット絵は `generate_images.py` 内のASCIIグリッド、
+**ドット絵・BGM・SE・ゲームコードは新規に作ったもの。**
+例外として、DS版の文字表示に使う 5x7 フォントのデータは
+[Pimoroni microdot-phat](https://github.com/pimoroni/microdot-phat)(MIT License、
+Copyright (c) 2017 Pimoroni Ltd.)の公開データをそのまま使っている。ドット絵は `generate_images.py` 内のASCIIグリッド、
 BGMは `generate_audio.py` 内の音符データ(小節・拍・音高)として
 ソースに直接書かれており、スクリプトを実行すると同じ結果が再現できる。
 生成スクリプトはPython標準ライブラリのみを使い、ネットワークアクセスも
 外部ファイルの読み込みも行わない。
 
-このリポジトリが同梱している第三者ソフトウェアは
-[enchant.js](https://github.com/wise9/enchant.js) v0.8.3(MIT)の1点だけ。
-DS版が使う libnds / maxmod / newlib は各自の環境でビルド時にリンクされるもので、
+このリポジトリが含む第三者のものは
+[enchant.js](https://github.com/wise9/enchant.js) v0.8.3(MIT)と、上記のフォントデータ(MIT)の2点。
+DS版が使う calico / libnds / maxmod / newlib などはビルド時に組み込まれるもので、
 このリポジトリには含まれない。
 
 詳細は [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) を参照。
